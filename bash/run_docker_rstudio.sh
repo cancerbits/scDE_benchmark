@@ -19,6 +19,5 @@ docker run -d --rm \
   -e UMASK=002 \
   -e TZ=Europe/Vienna \
   --volume=${CONF_project_root_host}:${CONF_project_root} \
-  --volume=${CONF_data_root_host}:${CONF_data_root} \
   --volume=${CONF_out_root_host}:${CONF_out_root} \
   ${CONF_project_docker}

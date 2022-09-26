@@ -1,8 +1,12 @@
+# project name and name of docker image
 project_name: scDE_benchmark
-project_docker: cancerbits/dockr:example_project_name
-project_root_host: /path/to/project
+project_docker: cancerbits/scDE_benchmark
+
+# project-specific paths 
+# only the ones ending in _host should be changed
+# the others are paths used in the docker container
+project_root_host: /home/christoph_h/bioinf_isilon/Research/HALBRITTER/Internal/users/christoph_h/projects/scDE_benchmark
+out_root_host: /home_christoph_h/bioinf_isilon/Research/HALBRITTER/Internal/out/scDE_benchmark
+
 project_root: /home/rstudio
-data_root_host: /path/to/data/example_project
-data_root: /home/rstudio/mnt_data
-out_root_host: /path/to/output/example_project
 out_root: /home/rstudio/mnt_out
