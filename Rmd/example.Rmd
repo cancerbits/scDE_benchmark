@@ -1,0 +1,45 @@
+---
+title: 'Example rmarkdown'
+author: '`r Sys.info()["user"]`'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: show
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+```{r}
+# commands that are commonly used at beginning of Rmd files 
+# should all be placed in R/setup.R
+source("R/setup.R")
+
+# perhaps load libraries here
+#library('dplyr')
+```
+
+# Main
+
+Do stuff here
+```{r}
+x <- runif(1000)
+```
+
+```{r}
+hist(x)
+```
+
+# Appendix
+
+**Runtime**
+
+`r time_diff(SETUP_TIME)`
+
+**Session Info**
+
+```{r}
+sessionInfo()
+```

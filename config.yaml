@@ -1,0 +1,8 @@
+project_name: example_project_name
+project_docker: cancerbits/dockr:example_project_name
+project_root_host: /path/to/project
+project_root: /home/rstudio
+data_root_host: /path/to/data/example_project
+data_root: /home/rstudio/mnt_data
+out_root_host: /path/to/output/example_project
+out_root: /home/rstudio/mnt_out
