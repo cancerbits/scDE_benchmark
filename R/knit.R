@@ -3,18 +3,17 @@
 
 # set up output path for the reports
 config <- yaml::read_yaml("config.yaml")
-report_dir <- file.path(config$out_root)
+report_dir <- file.path(config$out_root, 'reports')
+dir.create(report_dir, recursive = TRUE, showWarnings = FALSE)
 
-# example 1: knit one specific file
-rmarkdown::render(input = 'Rmd/example.Rmd',
+# download and process the immune data
+# rmarkdown::render(input = 'Rmd/download_and_setup_immune_data.Rmd',
+#                   output_dir = report_dir,
+#                   knit_root_dir = config$project_root,
+#                   envir = new.env())
+
+# simulate data using muscat
+rmarkdown::render(input = 'Rmd/simulate_data.Rmd',
                   output_dir = report_dir,
                   knit_root_dir = config$project_root,
                   envir = new.env())
-
-# example 2: knit one specific file and pass parameters
-rmarkdown::render(input = 'Rmd/example_with_parameters.Rmd',
-                  output_dir = report_dir,
-                  knit_root_dir = config$project_root,
-                  envir = new.env(),
-                  params = list(mean = 100, sd = 100),
-                  output_file = 'example_with_parameters_100_100')

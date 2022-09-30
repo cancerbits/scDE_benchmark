@@ -1,28 +1,25 @@
-# the idea is to source this setup script at the beginning of 
-# all rmarkdown documents 
-# it will read the project config file and set default options
+CONFIG_FILE <- 'config.yaml'
 
 # load project-specific parameters
-config <- yaml::read_yaml(file = 'config.yaml')
+config <- yaml::read_yaml(CONFIG_FILE)
 
-# set knitr options
+# options regarding parallelization
+#Sys.setenv(OMP_NUM_THREADS = 1)
+#Sys.setenv(OMP_THREAD_LIMIT = 1)
+#Sys.setenv(OPENBLAS_NUM_THREADS = 1)
+#Sys.setenv(MKL_NUM_THREADS = 1)
+
+RhpcBLASctl::blas_set_num_threads(config$OPENBLAS_NUM_THREADS)
+future::plan(strategy = 'future::multisession', workers = config$R_FUTURE_WORKERS)
+options(future.globals.maxSize = 8 * 1024 ^ 3)
+
+# knitr and package options
 knitr::opts_chunk$set(comment = NA, fig.width = 7, fig.height = 4, out.width = '70%',
                       warning = TRUE, error = TRUE, echo = TRUE, message = TRUE,
-                      dpi = 100)
-
-# set some other package-specific options
+                      dpi = 300, rows.print=25)
 options(ggrepel.max.overlaps = Inf)
 
-options(future.plan = 'sequential', 
-        future.globals.maxSize = 8 * 1024 ^ 3)
+# set seed, store time, source other scripts with function definitions
+set.seed(8569205)
 
-ggplot2::theme_set(ggplot2::theme_bw(base_size = 12))
-
-# set a random seed
-set.seed(993751)
-
-# store the current CPU and real time
 SETUP_TIME <- proc.time()
-
-# source any scripts with commonly used functions
-source('R/utilities.R')

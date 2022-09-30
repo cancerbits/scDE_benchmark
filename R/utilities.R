@@ -12,3 +12,44 @@ time_diff <- function(start_time, end_time = NULL) {
           dt_elapsed, attr(x = dt_elapsed, which = 'units'),
           dt_cpu, attr(x = dt_cpu, which = 'units'))
 }
+
+# helper for downsampling counts
+downsample_counts <- function(counts, frac = 0.70) {
+  if (frac >= 1) {
+    return(counts)
+  }
+  target_umi <- round(colSums(counts) * frac)
+  new_counts <- Seurat:::RunUMISamplingPerCell(data = counts, sample_val = target_umi, display_progress = FALSE)
+  # Seurat:::RunUMISamplingPerCell creates non-standard sparse matrix with explicit zeros - fix here
+  new_counts <- Matrix::drop0(new_counts)
+  dimnames(new_counts) <- dimnames(counts)
+  return(new_counts)
+}
+
+# helper to create pseudobulk from single-cell data
+pseudobulk <- function(counts, grouping) {
+  mat <- sapply(levels(grouping), function(gr) {
+    sparseMatrixStats::rowSums2(x = counts, cols = grouping == gr)
+  })
+  colnames(mat) <- levels(grouping)
+  rownames(mat) <- rownames(counts)
+  return(mat)
+}
+
+run_pipeline <- function(input_data, transformation, de_method, 
+                         seed_trans = NULL, seed_de = NULL) {
+  trans_out <- run_tr(mat = input_data$counts, transformation = transformation, seed = seed_trans)
+  de_out <- run_de(mat = trans_out$res, grouping = input_data$cell_metadata$group_id, 
+                   methods = de_method, seed = seed_de)
+  # join the de results with the simulation parameters if they are available
+  if ('sim_metadata' %in% names(input_data)) {
+    res <- dplyr::left_join(de_out$res, input_data$sim_metadata$gene_info, by = c('feature' = 'gene'))
+  } else {
+    res <- de_out$res
+  }
+  
+  timing <- data.frame(step = c('transformation', 'de_method'),
+                       name = c(transformation, de_method),
+                       time = c(trans_out$timing$time, de_out$timing$time))
+  return(list(res = res, timing = timing))
+}

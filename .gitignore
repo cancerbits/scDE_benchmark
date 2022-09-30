@@ -1,5 +1,6 @@
 # History files
 .Rhistory
+.bash_history
 
 # Session Data files
 .RData
@@ -13,3 +14,9 @@
 *.Rproj
 .config
 .local
+
+# logs
+docker_build_log_*
+
+# python cache
+.cache

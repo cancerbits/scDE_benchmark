@@ -11,7 +11,7 @@ source bash/parse_yaml.sh
 eval $(parse_yaml config.yaml CONF_)
 
 docker run -d --rm \
-  --name ${CONF_project_name} \
+  --name ${CONF_project_name}_${USER} \
   -p ${1}:8787 \
   -e PASSWORD=${2} \
   -e USERID=$(id -u) \

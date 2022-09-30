@@ -1,0 +1,132 @@
+---
+title: 'Run pipelines on simulated data'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+source('R/utilities.R')
+source('R/transformations.R')
+source('R/de_methods.R')
+library('magrittr')
+library('dplyr')
+library('future.apply')
+
+#library('Seurat')
+#library('dplyr')
+#library('Matrix')
+#library('SingleCellExperiment')
+
+#OUT_DIR <- file.path(config$out_root, 'simulated_data')
+#dir.create(path = OUT_DIR, showWarnings = FALSE, recursive = TRUE)
+
+DATA_DIR <- file.path(config$out_root, 'simulated_data')
+REPLICATES <- 13
+OUT_DIR <- file.path(config$out_root, 'results', 'simulated_data')
+dir.create(path = OUT_DIR, showWarnings = FALSE, recursive = TRUE)
+SEED_TRANS <- 783838
+SEED_DE <- 184920
+```
+
+# Main
+
+Read the pipeline definition files
+```{r}
+transformations <- readr::read_csv(file = file.path(config$project_root, 'pipelines', 'transformations.csv'))
+de_tests <- readr::read_csv(file = file.path(config$project_root, 'pipelines', 'de_tests.csv'))
+```
+
+Expand all the transformations
+```{r}
+transformations <- tidyr::separate_rows(transformations, `size factor methods`) %>% 
+  mutate(idx = 1:n()) %>%
+  group_by(idx) %>%
+  mutate(name = stringr::str_interp(string = name, env = list(sf = `size factor methods`))) %>%
+  ungroup()
+```
+
+Expand all the test methods
+```{r}
+de_tests <- tidyr::separate_rows(de_tests, `size factor methods`) %>% 
+  tidyr::separate_rows(`pseudo replicates`) %>%
+  mutate(idx = 1:n()) %>%
+  group_by(idx) %>%
+  mutate(name = stringr::str_interp(string = name, env = list(sf = `size factor methods`, pr = `pseudo replicates`))) %>%
+  ungroup()
+```
+
+List data files
+```{r}
+data_files <- list.files(path = DATA_DIR, full.names = TRUE)
+```
+
+Create data frame of pipelines
+```{r}
+pipelines <- full_join(transformations, de_tests, by = character(), suffix = c(".trans", ".de")) %>%
+  filter(`use with transformation` == 'ANY' | 
+         (`use with transformation` == 'COUNTS' & grepl(pattern = 'counts', x = name.trans)) | 
+         (`use with transformation` == 'SPARSE' & `result is sparse`))
+```
+
+Go over the files, create list of jobs and run them
+```{r}
+for (f in data_files) {
+  data_name <- gsub(pattern = 'sim_data_', replacement = '', x = basename(f))
+  data_name <- gsub(pattern = '\\.Rds$', replacement = '', x = data_name)
+  message('simulation experiment ', data_name)
+  
+  data_lst <- readRDS(f)
+  
+  jobs <- full_join(
+    full_join(data.frame(data_name = data_name), data.frame(replicate = 1:length(data_lst)), by = character()),
+    pipelines,
+    by = character()
+  )
+  message('\tnumber of jobs: ', nrow(jobs))
+  
+  #return_values <- future_sapply(X = 1:nrow(jobs), FUN = function(i) {
+  return_values <- future_sapply(X = 1:12, FUN = function(i) {
+    replicate_n <- jobs$replicate[i]
+    transformation <- jobs$name.trans[i]
+    de_method <- jobs$name.de[i]
+    out_file <- file.path(OUT_DIR, sprintf('%s-%02d-%s-%s.Rds', data_name, replicate_n, transformation, de_method))
+    if (file.exists(out_file)) {
+      message(out_file, ' exists')
+      return('exists')
+    } else {
+      res <- run_pipeline(input_data = data_lst[[replicate_n]], 
+                          transformation = transformation, 
+                          de_method = de_method,
+                          seed_trans = SEED_TRANS, seed_de = SEED_DE)
+      saveRDS(object = res, file = out_file)
+      return('done')
+    }
+  }, future.globals = ls(), future.packages = c('dplyr'), future.seed=TRUE)
+  table(return_values)
+}
+```
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```
+
+More session info
+```{r}
+devtools::session_info()
+```

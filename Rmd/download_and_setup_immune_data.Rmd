@@ -1,0 +1,134 @@
+---
+title: 'Download and setup immune data'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+library('dplyr')
+library('Seurat')
+library('canceRbits')
+library('patchwork')
+source('R/utilities.R')
+#source('R/de_methods.R')
+#source('R/transformations.R')
+```
+
+# Download data and apply our standard workflow
+
+We are going to use the public 10x data set
+> 10k Human PBMCs, 3' v3.1, Chromium Controller
+> Single Cell Gene Expression Dataset by Cell Ranger 6.1.0
+
+https://www.10xgenomics.com/resources/datasets/10k-human-pbmcs-3-v3-1-chromium-controller-3-1-high
+
+> Human peripheral blood mononuclear cells (PBMCs) of a healthy female donor aged 25-30 were obtained by 10x Genomics from AllCells.
+> 
+> Libraries were generated from ~16,000 cells (11,485 cells recovered) as described in the Chromium Single Cell 3' Reagent Kits User Guide (v3.1 Chemistry Dual Index) (CG000315 Rev C) using the Chromium Controller and sequenced on an Illumina NovaSeq 6000 to a read depth of approximately 30,000 mean reads per cell.
+> 
+> Paired-end, dual indexing Read 1: 28 cycles (16 bp barcode, 12 bp UMI) i5 index: 10 cycles (sample index) i7 index: 10 cycles (sample index) Read 2: 90 cycles (transcript)
+> 
+> Analysis Parameters Used: Run with --expect-cells=10000.
+
+```{r}
+immune_dir <- file.path(config$out_root, 'immune_data')
+dir.create(immune_dir, recursive = TRUE)
+
+h5_url <- 'https://cf.10xgenomics.com/samples/cell-exp/6.1.0/10k_PBMC_3p_nextgem_Chromium_Controller/10k_PBMC_3p_nextgem_Chromium_Controller_filtered_feature_bc_matrix.h5'
+f <- file.path(immune_dir, basename(h5_url))
+if (!file.exists(f)) {
+  download.file(url = h5_url, destfile = f)
+}
+```
+Load and filter
+
+```{r}
+counts <- cb_load_counts(path = f)
+filter_out <- cb_filter_count_matrix(counts = counts, sample_id = '10k_PBMC')
+```
+
+```{r}
+fig <- wrap_plots(filter_out$figures) +
+  plot_annotation(title = filter_out$fig_title)
+show(fig)
+```
+
+Run Seurat pipeline
+
+```{r}
+tmp <- cb_seurat_pipeline(filter_out$filtered, cluster_res = 0.8)
+```
+
+
+```{r, fig.width=12, fig.height=14, out.width='100%'}
+fig <- (tmp$figures[[1]] / tmp$figures[[3]]) + plot_layout(heights = c(3,2))
+fig <- (fig | tmp$figures[[2]]) + plot_layout(widths = c(1, 2))
+fig <- fig / tmp$figures[[4]] + plot_layout(heights = c(3,1))
+
+show(fig + plot_annotation(title = tmp$fig_title))
+```
+
+Celltypist annotation
+
+
+```{r}
+s <- tmp$s
+ct_out <- cb_celltypist(counts = s$RNA@counts, ct_models = 'Immune_All_Low.pkl')
+```
+
+Focus on the three main cell types
+
+```{r}
+s <- Seurat::AddMetaData(s, ct_out$Immune_All_Low.pkl)
+sort(table(s$predicted_labels), decreasing = TRUE)
+s$predicted_cell_class <- stringr::str_extract(toupper(s$predicted_labels), pattern = '(?<!I)T CELLS|MONOCYTES|B CELLS')
+s$predicted_cell_class[is.na(s$predicted_cell_class)] <- 'other'
+DimPlot(s, group.by = 'predicted_cell_class')
+```
+
+Keep all clusters that have not more than 50% 'other' cells and that are not less than 100 cells in size. Remove all 'other' cells.
+```{r}
+small_clusters <- count(s@meta.data, seurat_clusters) %>% filter(n < 100) %>% pull(seurat_clusters)
+other_clusters <- group_by(s@meta.data, seurat_clusters) %>% summarise(other_frac = sum(predicted_cell_class == 'other') / n()) %>%
+  filter(other_frac > 0.5) %>% pull(seurat_clusters)
+keep <- !(s$seurat_clusters %in% small_clusters | s$seurat_clusters %in% other_clusters) & s$predicted_cell_class != 'other'
+s <- s[, keep]
+
+ct_sum <- count(s@meta.data, seurat_clusters, predicted_cell_class) %>%
+  group_by(seurat_clusters) %>%
+  slice_max(order_by = n, n = 1)
+  
+s$broad_cell_type <- droplevels(s$seurat_clusters)
+levels(s$broad_cell_type) <- ct_sum$predicted_cell_class
+DimPlot(s, group.by = 'broad_cell_type')
+```
+
+Save cell meta data and counts
+
+```{r}
+s <- Seurat::AddMetaData(object = s, metadata = as.data.frame(s[['umap']]@cell.embeddings))
+saveRDS(object = s$RNA@counts, 
+        file = gsub(pattern = '\\.h5$', replacement = '_seurat_counts.Rds', x = f))
+saveRDS(object = s@meta.data, 
+        file = gsub(pattern = '\\.h5$', replacement = '_seurat_metadata.Rds', x = f))
+```
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```
