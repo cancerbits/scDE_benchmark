@@ -29,6 +29,9 @@ size_factors <- function(counts, method) {
   if (is.null(method)) {
     return(NULL)
   }
+  if (method == FALSE) {
+    return(FALSE)
+  }
   if (method == 'poscounts') {
     sf <- transformGamPoi:::estimate_size_factors(Y = as.matrix(counts), method = method)
   } else if (method %in% c('deconvolution', 'normed_sum')) {
@@ -50,7 +53,7 @@ size_factors <- function(counts, method) {
     if (inherits(x = counts, what = 'dgCMatrix')) {
       feats <- diff(counts@p)
       cell_det_rate <- feats / nrow(counts)
-      cell_gmean <- sctransform:::row_gmean_dgcmatrix(matrix = t(counts), eps = median(cell_det_rate))
+      cell_gmean <- sctransform:::row_gmean_dgcmatrix(matrix = Matrix::t(counts), eps = median(cell_det_rate))
       sf <- cell_gmean / exp(mean(log(cell_gmean)))
     } else {
       cell_det_rate <- matrixStats::colMeans2(counts > 0)

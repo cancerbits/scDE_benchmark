@@ -18,7 +18,6 @@ source("R/setup.R")
 source('R/utilities.R')
 source('R/transformations.R')
 source('R/de_methods.R')
-library('magrittr')
 library('dplyr')
 library('future.apply')
 
@@ -94,8 +93,7 @@ for (f in data_files) {
   )
   message('\tnumber of jobs: ', nrow(jobs))
   
-  #return_values <- future_sapply(X = 1:nrow(jobs), FUN = function(i) {
-  return_values <- future_sapply(X = 1:12, FUN = function(i) {
+  return_values <- future_sapply(X = 1:nrow(jobs), FUN = function(i) {
     replicate_n <- jobs$replicate[i]
     transformation <- jobs$name.trans[i]
     de_method <- jobs$name.de[i]
@@ -111,7 +109,7 @@ for (f in data_files) {
       saveRDS(object = res, file = out_file)
       return('done')
     }
-  }, future.globals = ls(), future.packages = c('dplyr'), future.seed=TRUE)
+  }, future.seed=TRUE)
   table(return_values)
 }
 ```
@@ -124,6 +122,11 @@ Runtime: `r time_diff(SETUP_TIME)`
 Session Info
 ```{r}
 sessionInfo()
+```
+
+Future plan
+```{r}
+future::plan()
 ```
 
 More session info

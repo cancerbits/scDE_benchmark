@@ -10,8 +10,9 @@ config <- yaml::read_yaml(CONFIG_FILE)
 #Sys.setenv(MKL_NUM_THREADS = 1)
 
 RhpcBLASctl::blas_set_num_threads(config$OPENBLAS_NUM_THREADS)
-future::plan(strategy = 'future::multisession', workers = config$R_FUTURE_WORKERS)
 options(future.globals.maxSize = 8 * 1024 ^ 3)
+options(parallelly.fork.enable = TRUE)
+future::plan(strategy = 'future::multicore', workers = config$R_FUTURE_WORKERS)
 
 # knitr and package options
 knitr::opts_chunk$set(comment = NA, fig.width = 7, fig.height = 4, out.width = '70%',

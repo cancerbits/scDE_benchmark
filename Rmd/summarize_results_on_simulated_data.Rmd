@@ -1,0 +1,107 @@
+---
+title: 'Summarize results on simulated data'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+source('R/utilities.R')
+
+library('dplyr')
+library('future.apply')
+
+DATA_DIR <- file.path(config$out_root, 'simulated_data')
+RES_DIR <- file.path(config$out_root, 'results', 'simulated_data')
+OUT_DIR <- file.path(config$out_root, 'results', 'simulated_data_summarized')
+dir.create(path = OUT_DIR, showWarnings = FALSE, recursive = TRUE)
+```
+
+# Main
+
+For each experiment, read all results and calculate performance metrics per pipeline and replicate.
+
+Also calculate performance stratified by gene mean:
+
+Place genes into groups
+- low expression (mean < 0.1)
+- medium expression (0.1 <= mean < 1)
+- high expression (1 <= mean)
+
+```{r}
+experiments <- list.files(path = DATA_DIR, full.names = FALSE) %>%
+  stringr::str_remove(pattern = '\\.Rds$') %>%
+  stringr::str_remove(pattern = '^sim_data_')
+
+gene_mean_breaks <- c(-Inf, 0.1, 1, Inf)
+
+for (experiment in experiments) {
+  rds_files <- list.files(path = RES_DIR, pattern = sprintf('^%s-.*\\.Rds$', experiment), full.names = TRUE)
+  
+  res_list <- future_lapply(X = rds_files, FUN = function(f) {
+    f_parts <- stringr::str_split(string = stringr::str_remove(basename(f), pattern = '\\.Rds$'), pattern = '-')[[1]]
+    replicate <- as.numeric(f_parts[2])
+    transformation <- f_parts[3]
+    de_method <- f_parts[4]
+    pipeline <- paste(transformation, de_method, sep = '-')
+    
+    res <- readRDS(f) #$res %>% mutate(file = basename(f))
+    transformation_time = dplyr::filter(res$timing, step == 'transformation')$time
+    method_time = dplyr::filter(res$timing, step == 'de_method')$time
+    
+    # add geometric mean of simulation, and pipeline label, and fix missing p-values
+    de_res <- res$res %>% 
+      mutate(sim_mean = expm1((log1p(sim_mean.A) + log1p(sim_mean.B)) / 2),
+             expr_grp = cut(sim_mean, breaks = gene_mean_breaks, labels = c('low', 'medium', 'high')),
+             pval = case_when(is.na(pval) ~ 1, TRUE ~ pval),
+             FDR = p.adjust(pval, method = 'fdr'),
+             pred_de = factor(FDR < 0.05, levels = c(FALSE, TRUE)),
+             true_de = factor(!is.na(logFC), levels = c(FALSE, TRUE)))
+    
+    performance <- summarise(de_res, n = n(), class_stats(pred_de, true_de, FDR)) %>%
+      mutate(time_trans = transformation_time, time_de = method_time)
+    
+    performance_strat <- group_by(de_res, expr_grp) %>%
+      summarise(n = n(), class_stats(pred_de, true_de, FDR), .groups = 'drop')
+    
+    performance_sum <- dplyr::bind_rows(performance, performance_strat) %>%
+      mutate(experiment = experiment, replicate = replicate, transformation = transformation, de_method = de_method, pipeline = pipeline)
+      
+    return(performance_sum)
+  })
+  
+  res <- as_tibble(data.table::rbindlist(res_list)) %>%
+    mutate(across(where(is.character), as.factor))
+  
+  saveRDS(res, file = file.path(OUT_DIR, sprintf('performance_%s.Rds', experiment))) 
+}
+```
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```
+
+Future plan
+```{r}
+future::plan()
+```
+
+More session info
+```{r}
+devtools::session_info()
+```

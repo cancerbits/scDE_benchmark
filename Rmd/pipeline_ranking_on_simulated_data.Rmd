@@ -1,0 +1,332 @@
+---
+title: 'Pipeline ranking on simulated data'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+source('R/utilities.R')
+
+library('dplyr')
+library('ComplexHeatmap')
+
+RES_DIR <- file.path(config$out_root, 'results', 'simulated_data_summarized')
+FIG_DIR <- file.path(config$out_root, 'figures')
+FIG_SUPP_DIR <- file.path(config$out_root, 'figures', 'supp')
+dir.create(path = FIG_SUPP_DIR, showWarnings = FALSE, recursive = TRUE)
+```
+
+Define some constants
+```{r}
+experiment_for_time <- '2k_vs_2k'
+experiment_for_fdr_low <- '2k_vs_2k'
+experiment_for_fdr_high <- '2k_vs_2k'
+experiment_order <- c('20_vs_20', '200_vs_200', '2k_vs_2k', '200_vs_2k')
+```
+
+# Main
+
+## Read the pipeline definitions
+
+Read the pipeline definition files
+```{r}
+transformations <- readr::read_csv(file = file.path(config$project_root, 'pipelines', 'transformations.csv'))
+de_tests <- readr::read_csv(file = file.path(config$project_root, 'pipelines', 'de_tests.csv'))
+```
+
+Expand all the transformations
+```{r}
+transformations <- tidyr::separate_rows(transformations, `size factor methods`) %>% 
+  mutate(idx = 1:n()) %>%
+  group_by(idx) %>%
+  mutate(name = stringr::str_interp(string = name, env = list(sf = `size factor methods`))) %>%
+  ungroup()
+```
+
+Expand all the test methods
+```{r}
+de_tests <- tidyr::separate_rows(de_tests, `size factor methods`) %>% 
+  tidyr::separate_rows(`pseudo replicates`) %>%
+  mutate(idx = 1:n()) %>%
+  group_by(idx) %>%
+  mutate(name = stringr::str_interp(string = name, env = list(sf = `size factor methods`, pr = `pseudo replicates`))) %>%
+  ungroup()
+```
+
+Create data frame of pipelines
+```{r}
+pipelines <- full_join(transformations, de_tests, by = character(), suffix = c(".trans", ".de")) %>%
+  filter(`use with transformation` == 'ANY' | 
+         (`use with transformation` == 'COUNTS' & grepl(pattern = 'counts', x = name.trans)) | 
+         (`use with transformation` == 'SPARSE' & `result is sparse`)) %>%
+  mutate(pipeline = paste(name.trans, name.de, sep = '-'))
+```
+
+
+## Read in all results
+
+```{r}
+rds_files <- list.files(path = RES_DIR, pattern = '^performance_.*\\.Rds$', full.names = TRUE)
+res_list <- lapply(rds_files, readRDS)
+res <- as_tibble(data.table::rbindlist(res_list)) %>%
+  mutate(experiment = factor(experiment, levels = experiment_order))
+```
+
+Also add FDR column (set to zero if no positives were predicted)
+```{r}
+res <- mutate(res, FDR = case_when(FP + TP == 0 ~ 0, TRUE ~ 1 - Precision)) 
+```
+
+## Rank based on GSS and FDR
+
+```{r}
+fr <- filter(res, is.na(expr_grp)) %>%
+  group_by(transformation, de_method, pipeline) %>%
+  summarise(n = n(), GSS = mean(GSS), .groups = 'drop') 
+fdr_low <- filter(res, expr_grp == 'low', experiment == experiment_for_fdr_low) %>%
+  group_by(transformation, de_method, pipeline) %>%
+  summarise(FDR = mean(FDR), .groups = 'drop') %>%
+  dplyr::rename(FDR_low = FDR)
+fdr_high <- filter(res, expr_grp == 'high', experiment == experiment_for_fdr_high) %>%
+  group_by(transformation, de_method, pipeline) %>%
+  summarise(FDR = mean(FDR), .groups = 'drop') %>%
+  dplyr::rename(FDR_high = FDR)
+
+fr <- left_join(fr, fdr_low)
+fr <- left_join(fr, fdr_high)
+
+fr <- mutate(fr, score = GSS + (1 - FDR_low) + (1 - FDR_high)) %>%
+  arrange(-score) %>%
+  mutate(pos = rank(-score, ties.method = 'min'))
+fr
+```
+
+## Create figures
+
+We want to show the time as well, add it here
+```{r}
+# use avg time for the 2k vs 2k runs
+res_time <- filter(res, is.na(expr_grp), experiment == experiment_for_time) %>%
+  group_by(pipeline) %>%
+  summarise(time = median(time_trans + time_de), .groups = 'drop')
+fr <- left_join(fr, res_time)
+fr
+```
+
+We want to show Prec and Sens per pipeline per experiment
+```{r}
+prec_sens <- group_by(res, experiment, transformation, de_method, pipeline) %>%
+  summarise(n_Prec = sum(!is.na(Precision)),
+            Prec = mean(Precision, na.rm = TRUE),
+            n_Sens = sum(!is.na(Sensitivity)),
+            Sens = mean(Sensitivity, na.rm = TRUE), .groups = 'drop')
+```
+
+Get data into wide format
+```{r}
+prec_sens_wide <- arrange(prec_sens, experiment) %>%
+                  tidyr::pivot_wider(
+                              id_cols = c(pipeline, transformation, de_method),
+                              names_from = c(experiment, experiment), 
+                              values_from = c(Prec, Sens)) %>%
+  select(-transformation, -de_method) 
+prec_sens_wide <- left_join(select(fr, pipeline), prec_sens_wide, by = 'pipeline')
+```
+
+Define the main plotting function
+```{r}
+res_heatmap <- function(fr, prec_sens_wide, idx = 1:nrow(fr), do_rescale = TRUE,
+                        filename = NULL, fig_width = 7, fig_height = 32) {
+  fr <- fr[idx, ]
+  prec_sens_wide <- left_join(select(fr, pipeline), prec_sens_wide, by = 'pipeline')
+  
+  mat <- as.matrix(left_join(fr, prec_sens_wide, by = 'pipeline') %>%
+                   select(starts_with(c("Prec", "Sens"))))
+  rownames(mat) <- as.character(fr$pipeline)
+  colnames(mat) <- stringr::str_remove(colnames(mat), '^Prec_|^Sens_')
+  colnames(mat) <- stringr::str_replace_all(colnames(mat), pattern = '_', replacement = ' ')
+  
+  # create a scaled version for the colors
+  if (do_rescale) {
+    mat_rescaled <- apply(mat, 2, scales::rescale)
+    heatmap_legend_param <- list(
+            title = 'Column-\nrescaled\nvalue', at = c(0, 1), 
+            labels = c("Worst", "Best"), border = FALSE)
+  } else {
+    mat_rescaled <- mat
+    heatmap_legend_param <- list(title = 'Value')
+  }
+  
+  
+  # create a function print the values in each heatmap cell
+  cell_fun = function(j, i, x, y, width, height, fill) {
+            grid.text(sprintf("%2.0f", mat[i, j]*100), x, y, 
+                      gp = gpar(fontsize = 8, 
+                                col = c('white', 'black')[(mat_rescaled[i, j] > 0.4) + 1]))
+  }
+  
+  ta = HeatmapAnnotation(foo = anno_block(
+    gp = gpar(fill = 'gray'),
+    labels = c("Precision", "Sensitivity"), 
+    labels_gp = gpar(col = "black", fontsize = 10)))
+  
+  anno_right <- rowAnnotation(
+    GSS = anno_barplot(fr$GSS, bar_width = 1),
+    FDR_low = anno_barplot(fr$FDR_low, bar_width = 1),
+    FDR_high = anno_barplot(fr$FDR_high, bar_width = 1),
+    Time = anno_barplot(fr$time, bar_width = 1),
+    annotation_name_side = 'top')
+  
+  anno_left <- rowAnnotation(
+    Transformation = anno_text(fr$transformation, 
+                               just = "left", show_name = TRUE, 
+                               width = unit(25, 'mm'), 
+                               gp = gpar(fontsize = 11)),
+    `DE method` = anno_text(fr$de_method, 
+                           just = "left", show_name = TRUE,
+                           gp = gpar(fontsize = 11)), 
+    PB = grepl(pattern = '\\dpr', fr$de_method),
+    col = list(PB = c("FALSE" = "white", "TRUE" = "black")),
+    gap = unit(10, "points"),
+    annotation_name_rot = 0,
+    annotation_name_align = TRUE,
+    annotation_name_side = 'top',
+    show_legend = FALSE)
+  
+  
+  ch <- Heatmap(mat_rescaled, cluster_columns = FALSE, cluster_rows = FALSE,
+          show_row_names = FALSE, show_column_names = TRUE, column_names_rot = 45,
+          col = hcl.colors(n = 21, palette = 'viridis'),
+          name = 'Value', column_title = 'Overall performance',
+          column_split = rep(c("A", "B"), each = 4),
+          top_annotation = ta, right_annotation = anno_right,
+          left_annotation = anno_left,
+          cell_fun = cell_fun,
+          heatmap_legend_param = heatmap_legend_param)
+  
+  if (!is.null(filename)) {
+    cairo_pdf(filename = filename, width = fig_width, height = fig_height)
+    show(ch)
+    dev.off()
+  }
+  return(ch)
+}
+```
+
+
+Big heatmap
+```{r}
+ch <- res_heatmap(fr, prec_sens_wide, 
+                  filename = file.path(FIG_DIR, 'ranking_sim_data_big.pdf'), 
+                  fig_width = 7, fig_height = 48)
+```
+
+PB vs non-PB
+```{r}
+pb = grepl(pattern = '\\dpr', fr$de_method)
+ch <- res_heatmap(fr, prec_sens_wide, idx = which(pb),
+                  filename = file.path(FIG_DIR, 'ranking_sim_data_pb.pdf'), 
+                  fig_width = 7, fig_height = 22)
+ch <- res_heatmap(fr, prec_sens_wide, idx = which(!pb),
+                  filename = file.path(FIG_DIR, 'ranking_sim_data_sc.pdf'), 
+                  fig_width = 7, fig_height = 32)
+```
+
+Create reduced heatmaps
+
+```{r}
+
+```
+
+
+```{r}
+fr$de_method_grp1 = stringr::str_remove_all(string = fr$de_method, pattern = '\\d+(?=pr)')
+table(fr$de_method_grp1)
+
+idx <- mutate(fr, idx = 1:nrow(fr)) %>%
+  group_by(de_method_grp1) %>%
+  slice_min(order_by = idx) %>%
+  pull(idx) %>% sort()
+
+ch <- res_heatmap(fr, prec_sens_wide, idx = idx,
+                  filename = file.path(FIG_DIR, 'ranking_sim_data_filter1.pdf'), 
+                  fig_width = 7, fig_height = 6)
+
+fr <- mutate(fr, de_method_grp2 = stringr::str_remove_all(string = de_method_grp1, pattern = '_(lrt|wald|exact|qlf|trend|voom)$'))
+fr <- mutate(fr, de_method_grp2 = stringr::str_remove_all(string = de_method_grp2, pattern = '_(ns|pc|dc|pf|10k|gm)'))
+table(fr$de_method_grp2)
+
+idx <- mutate(fr, idx = 1:nrow(fr)) %>%
+  group_by(de_method_grp2) %>%
+  slice_min(order_by = idx) %>%
+  pull(idx) %>% sort()
+
+ch <- res_heatmap(fr, prec_sens_wide, idx = idx,
+                  filename = file.path(FIG_DIR, 'ranking_som_data_filter2.pdf'), 
+                  fig_width = 7, fig_height = 4)
+```
+
+Save final ranking 
+```{r}
+saveRDS(list(fr = fr, prec_sens_wide = prec_sens_wide), 
+        file = file.path(RES_DIR, 'final_ranking_sim_data.Rds'))
+```
+
+One plot per transformation
+```{r}
+for (transf in unique(fr$transformation)) {
+  idx <- which(fr$transformation == transf)
+  ch <- res_heatmap(fr, prec_sens_wide, idx = idx, do_rescale = FALSE,
+                  filename = file.path(FIG_SUPP_DIR, sprintf('ranking_sim_data_transf_%s.pdf', transf)), 
+                  fig_width = 7, fig_height = 2 + 0.2 * length(idx))
+}
+```
+
+One plot per method group
+```{r}
+method_grp = stringr::str_remove_all(string = fr$de_method, pattern = '\\d+(?=pr)')
+method_grp = stringr::str_remove_all(string = method_grp, pattern = '_(ns|pc|dc|pf|10k|gm)')
+method_grp = stringr::str_remove_all(string = method_grp, pattern = '_(emp|app)')
+method_grp = stringr::str_remove_all(string = method_grp, pattern = '_(limma|presto)')
+method_grp = stringr::str_remove_all(string = method_grp, pattern = '_(lrt|wald|exact|qlf)')
+method_grp = stringr::str_remove_all(string = method_grp, pattern = '_(trend|voom)')
+method_grp = stringr::str_remove_all(string = method_grp, pattern = 'detrate$')
+table(method_grp)
+
+for (meth in unique(method_grp)) {
+  idx <- which(method_grp == meth)
+  ch <- res_heatmap(fr, prec_sens_wide, idx = idx, do_rescale = FALSE,
+                  filename = file.path(FIG_SUPP_DIR, sprintf('ranking_sim_data_meth_%s.pdf', meth)), 
+                  fig_width = 7, fig_height = 2 + 0.2 * length(idx))
+}
+```
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```
+
+Future plan
+```{r}
+future::plan()
+```
+
+More session info
+```{r}
+devtools::session_info()
+```

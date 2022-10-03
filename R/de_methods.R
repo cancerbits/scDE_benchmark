@@ -172,7 +172,7 @@ de_mast <- function(mat, grouping) {
 ## single-cell methods operating on counts
 
 # quasi-likelihood ratio testing as implemented in glmGamPoi
-de_qlrt <- function(mat, grouping, size_factors) {
+de_qlrt <- function(mat, grouping, size_factors = FALSE) {
   ref_grp <- levels(grouping)[2]
   fit <- glmGamPoi::glm_gp(data = as.matrix(mat), design = ~ grouping, size_factors = size_factors)
   res <- glmGamPoi::test_de(fit = fit, contrast = paste0('grouping', ref_grp))
@@ -182,17 +182,17 @@ de_qlrt <- function(mat, grouping, size_factors) {
 }
 
 de_qlrt_10k <- function(mat, grouping) {
-  sf <- size_factors(counts = counts, method = '10k')
+  sf <- size_factors(counts = mat, method = '10k')
   de_qlrt(mat, grouping, size_factors = sf)
 }
 
 de_qlrt_gm <- function(mat, grouping) {
-  sf <- size_factors(counts = counts, method = 'gmean')
+  sf <- size_factors(counts = mat, method = 'gmean')
   de_qlrt(mat, grouping, size_factors = sf)
 }
 
 de_qlrt_pf <- function(mat, grouping) {
-  sf <- size_factors(counts = counts, method = 'pf')
+  sf <- size_factors(counts = mat, method = 'pf')
   de_qlrt(mat, grouping, size_factors = sf)
 }
 
@@ -456,15 +456,15 @@ de_limma_trend_7pr <- function(mat, grouping) {
 # use glmGamPoi qlrt on pseudobulk data (test since this could be an alternative to edger/deseq)
 
 de_qlrt_3pr <- function(mat, grouping) {
-  pseudobulk_de(mat, grouping, G = 3, test_method = 'glmGamPoi', size_factors = NULL)
+  pseudobulk_de(mat, grouping, G = 3, test_method = 'glmGamPoi', size_factors = FALSE)
 }
 
 de_qlrt_5pr <- function(mat, grouping) {
-  pseudobulk_de(mat, grouping, G = 5, test_method = 'glmGamPoi', size_factors = NULL)
+  pseudobulk_de(mat, grouping, G = 5, test_method = 'glmGamPoi', size_factors = FALSE)
 }
 
 de_qlrt_7pr <- function(mat, grouping) {
-  pseudobulk_de(mat, grouping, G = 7, test_method = 'glmGamPoi', size_factors = NULL)
+  pseudobulk_de(mat, grouping, G = 7, test_method = 'glmGamPoi', size_factors = FALSE)
 }
 
 de_qlrt_10k_3pr <- function(mat, grouping) {

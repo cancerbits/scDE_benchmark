@@ -74,3 +74,6 @@ RUN python -m venv $CELLTYPIST_FOLDER && \
     pip install wheel --no-cache-dir &&\
     pip install celltypist --no-cache-dir && \
     celltypist --update-models
+
+# more R packages
+RUN R -e "BiocManager::install(c('MAST'))"

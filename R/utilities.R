@@ -53,3 +53,32 @@ run_pipeline <- function(input_data, transformation, de_method,
                        time = c(trans_out$timing$time, de_out$timing$time))
   return(list(res = res, timing = timing))
 }
+
+# for classification performance metrics
+
+gilbert_skill_score <- function(TP, FN, FP, TN) {
+  (TP * TN - FN * FP) / ((FN + FP) * (TP + FN + FP + TN) + (TP * TN - FN * FP))
+}
+
+jacc_sim <- function(set1, set2) {
+  length(intersect(set1, set2)) / length(union(set1, set2))
+}
+
+class_stats <- function(prediction, reference, FDR = NULL, JS = TRUE) {
+  cm <- caret::confusionMatrix(data = prediction, reference = reference, positive = 'TRUE')
+  res <- data.frame(t(c(cm$byClass, cm$overall)))
+  if (!is.null(FDR)) {
+    pr_curve <- PRROC::pr.curve(scores.class0 = FDR, weights.class0 = reference == 'FALSE')
+    res$AUPR <- pr_curve$auc.integral
+  }
+  tab <- data.frame(t(as.numeric(cm$table)))
+  colnames(tab) <- c('TN', 'FP', 'FN', 'TP')
+  if (JS) {
+    js = sum((prediction == 'TRUE') & (reference == 'TRUE')) / sum((prediction == 'TRUE') | (reference == 'TRUE'))
+    tab <- cbind(tab, data.frame(JS = js))
+  }
+  tab <- cbind(tab, data.frame(GSS = gilbert_skill_score(tab$TP, tab$FN, tab$FP, tab$TN),
+                               Bias = (tab$TP + tab$FP) / (tab$TP + tab$FN)))
+  res <- cbind(tab, res)
+  return(res)
+}
