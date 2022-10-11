@@ -1,0 +1,155 @@
+---
+title: 'Run pipelines on immune data'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+source('R/utilities.R')
+source('R/transformations.R')
+source('R/de_methods.R')
+library('dplyr')
+library('future.apply')
+library('Matrix')
+
+#library('Seurat')
+#library('dplyr')
+#library('Matrix')
+#library('SingleCellExperiment')
+
+#OUT_DIR <- file.path(config$out_root, 'simulated_data')
+#dir.create(path = OUT_DIR, showWarnings = FALSE, recursive = TRUE)
+
+DATA_DIR <- file.path(config$out_root, 'immune_data')
+OUT_DIR <- file.path(config$out_root, 'results', 'immune_data')
+dir.create(path = OUT_DIR, showWarnings = FALSE, recursive = TRUE)
+SEED_TRANS <- 783838
+SEED_DE <- 184920
+```
+
+# Main
+
+Read the pipeline definition files
+```{r}
+transformations <- readr::read_csv(file = file.path(config$project_root, 'pipelines', 'transformations.csv'))
+de_tests <- readr::read_csv(file = file.path(config$project_root, 'pipelines', 'de_tests.csv'))
+```
+
+Expand all the transformations
+```{r}
+transformations <- tidyr::separate_rows(transformations, `size factor methods`) %>% 
+  mutate(idx = 1:n()) %>%
+  group_by(idx) %>%
+  mutate(name = stringr::str_interp(string = name, env = list(sf = `size factor methods`))) %>%
+  ungroup()
+```
+
+Expand all the test methods
+```{r}
+de_tests <- tidyr::separate_rows(de_tests, `size factor methods`) %>% 
+  tidyr::separate_rows(`pseudo replicates`) %>%
+  mutate(idx = 1:n()) %>%
+  group_by(idx) %>%
+  mutate(name = stringr::str_interp(string = name, env = list(sf = `size factor methods`, pr = `pseudo replicates`))) %>%
+  ungroup()
+```
+
+Create data frame of pipelines
+```{r}
+pipelines <- full_join(transformations, de_tests, by = character(), suffix = c(".trans", ".de")) %>%
+  filter(`use with transformation` == 'ANY' | 
+         (`use with transformation` == 'COUNTS' & grepl(pattern = 'counts', x = name.trans)) | 
+         (`use with transformation` == 'SPARSE' & `result is sparse`))
+```
+
+Load the data and summarize again
+```{r}
+meta_data <- readRDS(file = list.files(DATA_DIR, pattern = 'metadata\\.Rds$', full.names = TRUE))
+counts <- readRDS(file = list.files(DATA_DIR, pattern = 'counts\\.Rds$', full.names = TRUE))
+table(meta_data$broad_cell_type)
+```
+
+
+We want to run the pipelines on all pairwise comparisons
+```{r}
+comps <- c('T CELLS vs MONOCYTES', 'T CELLS vs B CELLS', 'MONOCYTES vs B CELLS')
+```
+
+Set up the data lists that will be used by the pipelines
+```{r}
+comp_data <- list()
+for (comp in comps) {
+  group_names <- stringr::str_split(string = comp, pattern = ' vs ')[[1]]
+  
+  selA <- meta_data$broad_cell_type == group_names[1]
+  selB <- meta_data$broad_cell_type == group_names[2]
+  
+  group_id <- factor(c(rep(group_names[1], sum(selA)), rep(group_names[2], sum(selB))),
+                     levels = group_names)
+  
+  comp_counts <- cbind(counts[, selA], counts[, selB])
+  
+  # keep only features with at least three non-zero observations
+  keep <- rowSums(comp_counts > 0) >= 3
+  comp_data[[comp]] <- list(counts = comp_counts[keep, ],
+                            cell_metadata = data.frame(group_id = group_id))
+  
+  message('comp ', comp, ': ', sum(selA), ' vs ', sum(selB), ' cells, ', sum(keep), ' features')
+}
+saveRDS(object = comp_data, file = file.path(DATA_DIR, 'immune_comp_data.Rds'))
+```
+
+Create list of jobs and run them
+```{r}
+jobs <- full_join(data.frame(comp = comps), pipelines, by = character())
+message('number of jobs: ', nrow(jobs))
+
+return_values <- future_sapply(X = 1:nrow(jobs), FUN = function(i) {
+  comp <- jobs$comp[i]
+  comp_for_file <- gsub(pattern = ' ', replacement = '_', x = comp)
+  transformation <- jobs$name.trans[i]
+  de_method <- jobs$name.de[i]
+  out_file <- file.path(OUT_DIR, sprintf('%s-%s-%s.Rds', comp_for_file, transformation, de_method))
+  if (file.exists(out_file)) {
+    message(out_file, ' exists')
+    return('exists')
+  } else {
+    res <- run_pipeline(input_data = comp_data[[comp]], 
+                        transformation = transformation, 
+                        de_method = de_method,
+                        seed_trans = SEED_TRANS, seed_de = SEED_DE)
+    saveRDS(object = res, file = out_file)
+    return('done')
+  }
+}, future.seed=TRUE)
+table(return_values)
+```
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```
+
+Future plan
+```{r}
+future::plan()
+```
+
+More session info
+```{r}
+devtools::session_info()
+```

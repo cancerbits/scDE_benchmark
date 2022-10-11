@@ -20,3 +20,6 @@ docker_build_log_*
 
 # python cache
 .cache
+
+# tmp stuff
+scratch

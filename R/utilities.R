@@ -82,3 +82,11 @@ class_stats <- function(prediction, reference, FDR = NULL, JS = TRUE) {
   res <- cbind(tab, res)
   return(res)
 }
+
+# subset a list of genesets to those that are offspring of a specific go_id
+# genesets is a named list of character vectors, the names contain the gene set ids
+subset_go_genesets <- function(genesets, go_id) {
+  gset_ids <- stringr::str_extract(string = names(genesets), pattern = 'GO:\\d+')
+  gset_keep <- gset_ids %in% as.list(GO.db::GOBPOFFSPRING)[[go_id]]
+  return(genesets[gset_keep])
+}

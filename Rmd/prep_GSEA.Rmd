@@ -1,0 +1,160 @@
+---
+title: 'Prep GSEA'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+source('R/utilities.R')
+
+library('dplyr')
+library('future.apply')
+library('canceRbits')
+
+DATA_DIR <- file.path(config$out_root, 'immune_data')
+# RES_DIR <- file.path(config$out_root, 'results', 'immune_data')
+GS_DIR <- file.path(config$out_root, 'geneset_data')
+dir.create(path = GS_DIR, showWarnings = FALSE, recursive = TRUE)
+OUT_DIR <- file.path(config$out_root, 'results', 'immune_data_summarized')
+dir.create(path = OUT_DIR, showWarnings = FALSE, recursive = TRUE)
+```
+
+# Main
+
+Download the gene sets we care about
+
+Download GO:BP 2021 
+```{r}
+gobp_url <- 'https://maayanlab.cloud/Enrichr/geneSetLibrary?mode=text&libraryName=GO_Biological_Process_2021'
+gobp_file <- file.path(GS_DIR, paste0(stringr::str_extract(gobp_url, pattern = '[^=]+$'), '.tsv'))
+if (!file.exists(gobp_file)) {
+  download.file(url = gobp_url, destfile = gobp_file)
+}
+```
+
+MSigDB
+```{r}
+sigdb_file <- file.path(GS_DIR, 'IMMUNESIGDB_genesets.Rds')
+if (!file.exists(sigdb_file)) {
+  tmp <- msigdbr::msigdbr(species = "Homo sapiens", category = "C7", subcategory = "IMMUNESIGDB")
+  gs_names <- unique(tmp$gs_name)
+  genesets <- lapply(gs_names, function(x) filter(tmp, gs_name == x) %>% pull(human_gene_symbol))
+  names(genesets) <- gs_names
+  saveRDS(object = genesets, file = sigdb_file)
+}
+```
+
+GOBP background GSEA
+
+For each major cell type split detected genes in half (based on expression) and perform GSEA
+
+Load expression data
+```{r}
+meta_data <- readRDS(file = list.files(DATA_DIR, pattern = 'metadata\\.Rds$', full.names = TRUE))
+counts <- readRDS(file = list.files(DATA_DIR, pattern = 'counts\\.Rds$', full.names = TRUE))
+```
+
+Run GSEA per cell type
+```{r}
+genesets <- cb_enrichr_gsets(filepath = gobp_file)
+bg_lst <- lapply(unique(meta_data$broad_cell_type), function(ct) {
+  sel <- meta_data$broad_cell_type == ct
+  daf <- data.frame(
+    feature = rownames(counts),
+    gmean = sctransform:::row_gmean_dgcmatrix(matrix = counts[, sel], eps = 1),
+    dr = sctransform:::row_nonzero_count_dgcmatrix(matrix = counts[, sel]) / sum(sel))
+  background <- filter(daf, dr >= 0.001) %>% pull(feature)
+  signature <- filter(daf, dr >= 0.001) %>% slice_max(order_by = gmean, prop = 0.5, with_ties = FALSE) %>% pull(feature)
+  hyper_res <- cb_hyper(signature = signature, 
+                        background = background, 
+                        genesets = genesets, 
+                        collapse = FALSE, 
+                        min_size = 3, 
+                        max_size = Inf, 
+                        verbose = TRUE) %>%
+    as_tibble() %>%
+    mutate(group = ct)
+})
+gsea_bg <- bind_rows(bg_lst)
+saveRDS(object = gsea_bg, file = file.path(OUT_DIR, 'immune_GOBP_2021_background.Rds'))
+```
+
+Summarize
+
+Unspecific terms are those that are enriched in the higher expressed genes across all cell types.
+```{r}
+gsea_bg_sum <- group_by(gsea_bg, group) %>%
+  mutate(rank = rank(pval, ties.method = 'min')) %>%
+  group_by(label) %>%
+  summarise(n = n(), n_sig = sum(fdr < 0.05), avg_rank = mean(rank)) %>%
+  arrange(-n_sig, avg_rank)
+saveRDS(object = gsea_bg_sum, file = file.path(OUT_DIR, 'immune_GOBP_2021_background_summary.Rds'))
+
+filter(gsea_bg_sum, n_sig == length(bg_lst)) %>%
+  select(label) %>%
+  readr::write_tsv(file = file.path(OUT_DIR, 'immune_GOBP_2021_unspecific_terms.tsv'), quote = 'none', col_names = FALSE)
+```
+
+Print some stats
+```{r}
+nrow(gsea_bg_sum)
+table(gsea_bg_sum$n_sig)
+```
+
+Also save a list of GOBP terms that are immune related
+```{r}
+gobp_genesets <- cb_enrichr_gsets(filepath = gobp_file)
+gobp_immune_genesets <- names(subset_go_genesets(gobp_genesets, go_id = 'GO:0002376'))
+gobp_immune_file <- file.path(GS_DIR, 'GO_Biological_Process_2021_immune.Rds')
+saveRDS(object = gobp_immune_genesets, file = gobp_immune_file)
+```
+
+And a list of the ImmuneSigDB genesets that are relevant to the cell type comparisons we are doing
+
+```{r}
+sigdb_genesets <- readRDS(sigdb_file)
+x <- names(sigdb_genesets)
+expected_isig <- list()
+expected_isig$T_CELLS_vs_B_CELLS <- x[grepl(pattern = 'TCELL', x = x) & 
+                                      grepl(pattern = 'BCELL', x = x) & 
+                                      !grepl(pattern = 'LUPUS', x = x)]
+expected_isig$T_CELLS_vs_MONOCYTES <- x[grepl(pattern = 'TCELL', x = x) & 
+                                        grepl(pattern = 'MONOCYTE', x = x)]
+expected_isig$MONOCYTES_vs_B_CELLS <- x[grepl(pattern = 'BCELL', x = x) & 
+                                        grepl(pattern = 'MONOCYTE', x = x) & 
+                                        !grepl(pattern = 'VACCINE', x = x)]
+print(expected_isig)
+
+sigdb_expected_file <- file.path(GS_DIR, 'IMMUNESIGDB_genesets_expected.Rds')
+saveRDS(object = expected_isig, file = sigdb_expected_file)
+```
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```
+
+Future plan
+```{r}
+future::plan()
+```
+
+More session info
+```{r}
+devtools::session_info()
+```

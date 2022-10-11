@@ -146,7 +146,7 @@ prec_sens_wide <- left_join(select(fr, pipeline), prec_sens_wide, by = 'pipeline
 Define the main plotting function
 ```{r}
 res_heatmap <- function(fr, prec_sens_wide, idx = 1:nrow(fr), do_rescale = TRUE,
-                        filename = NULL, fig_width = 7, fig_height = 32) {
+                        filename = NULL, fig_width = 7, fig_height = 32, show_values = TRUE) {
   fr <- fr[idx, ]
   prec_sens_wide <- left_join(select(fr, pipeline), prec_sens_wide, by = 'pipeline')
   
@@ -168,11 +168,14 @@ res_heatmap <- function(fr, prec_sens_wide, idx = 1:nrow(fr), do_rescale = TRUE,
   }
   
   
-  # create a function print the values in each heatmap cell
+  # create a function to print the values in each heatmap cell
   cell_fun = function(j, i, x, y, width, height, fill) {
             grid.text(sprintf("%2.0f", mat[i, j]*100), x, y, 
                       gp = gpar(fontsize = 8, 
                                 col = c('white', 'black')[(mat_rescaled[i, j] > 0.4) + 1]))
+  }
+  if (!show_values) {
+    cell_fun = NULL
   }
   
   ta = HeatmapAnnotation(foo = anno_block(
@@ -230,6 +233,14 @@ ch <- res_heatmap(fr, prec_sens_wide,
                   filename = file.path(FIG_DIR, 'ranking_sim_data_big.pdf'), 
                   fig_width = 7, fig_height = 48)
 ```
+
+Same, but without cell values and squished together
+```{r}
+ch <- res_heatmap(fr, prec_sens_wide, 
+                  filename = file.path(FIG_DIR, 'ranking_sim_data_big_squished.pdf'), 
+                  fig_width = 7, fig_height = 5, show_values = FALSE)
+```
+
 
 PB vs non-PB
 ```{r}

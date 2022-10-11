@@ -1,0 +1,128 @@
+---
+title: 'Summarize results on immune data'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+source('R/utilities.R')
+
+library('dplyr')
+library('future.apply')
+
+DATA_DIR <- file.path(config$out_root, 'immune_data')
+RES_DIR <- file.path(config$out_root, 'results', 'immune_data')
+GS_DIR <- file.path(config$out_root, 'geneset_data')
+OUT_DIR <- file.path(config$out_root, 'results', 'immune_data_summarized')
+dir.create(path = OUT_DIR, showWarnings = FALSE, recursive = TRUE)
+```
+
+# Main
+
+## Load the gene sets
+
+GO BP
+```{r}
+gobp_file <- file.path(GS_DIR, 'GO_Biological_Process_2021.tsv')
+gobp_genesets <- cb_enrichr_gsets(filepath = gobp_file)
+gobp_immune_file <- file.path(GS_DIR, 'GO_Biological_Process_2021_immune.Rds')
+gobp_immune_genesets <- readRDS(file = gobp_immune_file)
+gobp_unspecific <- readr::read_tsv(file = file.path(OUT_DIR, 'immune_GOBP_2021_unspecific_terms.tsv'), col_names = FALSE)$X1
+```
+
+ImmuneSigDB
+```{r}
+sigdb_file <- file.path(GS_DIR, 'IMMUNESIGDB_genesets.Rds')
+sigdb_genesets <- readRDS(sigdb_file)
+sigdb_expected_file <- file.path(GS_DIR, 'IMMUNESIGDB_genesets_expected.Rds')
+sigdb_expected_genesets <- readRDS(file = sigdb_expected_file)
+```
+
+## Process the results
+
+We do this per comparison
+```{r}
+comps <- list.files(path = RES_DIR, full.names = FALSE) %>%
+  stringr::str_extract(pattern = '^[^-]+') %>%
+  unique()
+print(comps)
+```
+
+
+```{r}
+for (comp in comps) {
+  message(comp)
+  
+  # merge GOBP and relevant isigDB gene sets
+  genesets <- c(gobp_genesets, sigdb_genesets[ names(sigdb_genesets) %in% sigdb_expected_genesets[[comp]] ])
+  
+  # run GSEA per DE pipeline
+  rds_files <- list.files(path = RES_DIR, pattern = paste0('^', comp, '.*\\.Rds$'), full.names = TRUE)
+  
+  gsea_list <- future_lapply(rds_files, FUN = function(f) {
+    
+    f_parts <- stringr::str_split(string = stringr::str_remove(basename(f), pattern = '\\.Rds$'), pattern = '-')[[1]]
+    transformation <- f_parts[2]
+    de_method <- f_parts[3]
+    pipeline <- paste(transformation, de_method, sep = '-')
+    
+    res <- readRDS(f)
+    de_res <- res$res %>% 
+      mutate(pval = case_when(is.na(pval) ~ 1, TRUE ~ pval),
+             FDR = p.adjust(pval, method = 'fdr'),
+             pred_de = FDR < 0.05)
+    
+    gsea_res <- de_res %>% 
+      summarise(cb_hyper(signature = as.character(feature[pred_de]), 
+                         background = as.character(feature), 
+                         genesets = genesets, 
+                         collapse = FALSE, 
+                         min_size = 3, 
+                         max_size = Inf, 
+                         verbose = TRUE)) %>%
+      select(-hits) %>%
+      mutate(transformation = transformation, de_method = de_method, pipeline = pipeline)
+      
+    return(gsea_res)
+    
+  }, future.seed=TRUE)
+  
+  gsea_res <- as_tibble(data.table::rbindlist(gsea_list)) %>%
+    mutate(across(where(is.character), as.factor)) %>%
+    mutate(is_gobp = grepl(pattern = '\\(GO:\\d+\\)$', x = label),
+           is_gobp_immune = label %in% gobp_immune_genesets,
+           is_gobp_unspecific = label %in% gobp_unspecific,
+           is_sigdb_expected = label %in% sigdb_expected_genesets[[comp]])
+  saveRDS(gsea_res, file = file.path(OUT_DIR, sprintf('gsea_%s.Rds', comp))) 
+}
+```
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```
+
+Future plan
+```{r}
+future::plan()
+```
+
+More session info
+```{r}
+devtools::session_info()
+```

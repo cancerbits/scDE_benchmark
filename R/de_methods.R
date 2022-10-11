@@ -7,6 +7,7 @@
 
 # methods may be a vector
 run_de <- function(mat, grouping, methods, seed = NULL) {
+  
   timing <- data.frame(method = methods, time = NA_real_)
   res_lst <- list()
   i <- 0
@@ -29,14 +30,29 @@ run_de <- function(mat, grouping, methods, seed = NULL) {
   return(list(timing = timing, res = res))
 }
 
+# simple effect size estimation: difference of medians
+effect_size <- function(mat, grouping) {
+  sel1 <- grouping == levels(grouping)[1]
+  sel2 <- grouping == levels(grouping)[2]
+  mat1 <- mat[, sel1, drop = FALSE]
+  mat2 <- mat[, sel2, drop = FALSE]
+  if (inherits(x = mat, what = 'dgCMatrix')) {
+    median_diff <- sparseMatrixStats::rowMedians(mat1) - sparseMatrixStats::rowMedians(mat2)
+  } else {
+    median_diff <- matrixStats::rowMedians(mat1) - matrixStats::rowMedians(mat2)
+  }
+  return(median_diff)
+}
+
 ## single-cell methods operating on expression data of any kind (any transformation)
 
 # riffle with empirical p-value
 de_random_emp <- function(mat, grouping) {
   ro <- riffle::diff_mean_test(y = mat, group_labels = grouping, 
                                R = 499, log2FC_th = -Inf, mean_th = -Inf, cells_th = 0, verbosity = 0)
-  res <- select(ro, gene, emp_pval, emp_pval_adj) %>%
-    dplyr::rename(feature = gene, pval = emp_pval, FDR = emp_pval_adj)
+  res <- select(ro, gene, emp_pval, emp_pval_adj, zscore) %>%
+    mutate(zscore = sign(-zscore)) %>%
+    dplyr::rename(feature = gene, pval = emp_pval, FDR = emp_pval_adj, effect_direction = zscore)
   return(res)
 }
 
@@ -44,8 +60,9 @@ de_random_emp <- function(mat, grouping) {
 de_random_app <- function(mat, grouping) {
   ro <- riffle::diff_mean_test(y = mat, group_labels = grouping, 
                                R = 49, log2FC_th = -Inf, mean_th = -Inf, cells_th = 0, verbosity = 0)
-  res <- dplyr::rename(ro, feature = gene, FDR = pval_adj) %>%
-    select(feature, pval, FDR)
+  res <- select(ro, gene, pval, pval_adj, zscore) %>%
+    mutate(zscore = sign(-zscore)) %>%
+    dplyr::rename(feature = gene, FDR = pval_adj, effect_direction = zscore)
   return(res)
 }
 
@@ -54,8 +71,9 @@ de_wilcox <- function(mat, grouping) {
   ref_grp <- levels(grouping)[2]
   res <- presto::wilcoxauc(X = mat, y = grouping) %>%
     filter(group == ref_grp) %>%
+    mutate(effect_direction = sign(auc - 0.5)) %>%
     dplyr::rename(FDR = padj) %>%
-    select(feature, pval, FDR)
+    select(feature, pval, FDR, effect_direction)
   return(res)
 }
 
@@ -106,9 +124,10 @@ de_ttest <- function(mat, grouping) {
   fac <- f1 + f2
   dof <- fac^2 / ( f1^2 / (n1 - 1) + f2^2 / (n2 - 1) )
   stat <- ( m1 - m2 ) / sqrt(fac)
-  pvalue <- 2 * pt( abs(stat), dof, lower.tail = FALSE )  
+  pvalue <- 2 * pt( abs(stat), dof, lower.tail = FALSE )
   res <- data.frame(feature = rownames(mat), pval = pvalue) %>%
-    mutate(FDR = p.adjust(p = pval, method = 'fdr'))
+    mutate(FDR = p.adjust(p = pval, method = 'fdr'), effect_direction = sign(-stat))
+  return(res)
 }
 
 # logistic regression likelihood ratio test
@@ -125,12 +144,20 @@ de_logreg_slow <- function(mat, grouping) {
   return(res)
 }
 
+# Rfast-style logistic regression
 de_logreg <- function(mat, grouping) {
-  grouping <- as.numeric(grouping) - 1
-  mat <- as.matrix(mat)
-  pval <- Rfast::univglms(x = t(mat), y = grouping, oiko = 'binomial')[, 'pvalue']
+  y <- as.numeric(grouping) - 1
+  x <- t(as.matrix(mat))
+  dm <- dim(x)
+  n <- dm[1]
+  d <- dm[2]
+  p <- sum(y)/n
+  ini <-  - 2 * ( n * p * log(p) + (n - n * p) * log(1 - p) )
+  mod <- Rfast::logistic_only(x, y, b_values = TRUE)
+  stat <- ini - mod['deviance', ]
+  pval <- pchisq(stat, 1, lower.tail = FALSE, log.p = FALSE)
   res <- data.frame(feature = rownames(mat), pval = pval) %>%
-    mutate(FDR = p.adjust(p = pval, method = 'fdr'))
+    mutate(FDR = p.adjust(p = pval, method = 'fdr'), effect_direction = sign(mod['slope', ]))
   return(res)
 }
 
@@ -161,11 +188,15 @@ de_mast <- function(mat, grouping) {
     zlmCond <- MAST::zlm(formula = ~ group, sca = sca)
     summaryCond <- MAST::summary(object = zlmCond, doLRT = paste0('group', ref_grp))}
   )
-  summaryDt <- summaryCond$datatable %>% filter(component == 'H')
+  summaryDt <- left_join(
+    summaryCond$datatable %>% filter(component == 'H') %>% select(primerid, `Pr(>Chisq)`),
+    summaryCond$datatable %>% filter(component == 'logFC') %>% select(primerid, coef),
+    by = 'primerid'
+  )
   res <- data.frame(feature = rownames(mat)) %>%
     left_join(summaryDt, by = c('feature' = 'primerid')) %>%
-    mutate(pval = `Pr(>Chisq)`, FDR = p.adjust(p = pval, method = 'fdr')) %>%
-    select(feature, pval, FDR)
+    mutate(pval = `Pr(>Chisq)`, FDR = p.adjust(p = pval, method = 'fdr'), effect_direction = sign(coef)) %>%
+    select(feature, pval, FDR, effect_direction)
   return(res)
 }
 
@@ -173,11 +204,14 @@ de_mast <- function(mat, grouping) {
 
 # quasi-likelihood ratio testing as implemented in glmGamPoi
 de_qlrt <- function(mat, grouping, size_factors = FALSE) {
+  # I have not figured out how to specify the contrast if there are spaces in the group levels
+  levels(grouping) <- gsub(pattern = ' ', replacement = '_', x = levels(grouping))
   ref_grp <- levels(grouping)[2]
   fit <- glmGamPoi::glm_gp(data = as.matrix(mat), design = ~ grouping, size_factors = size_factors)
   res <- glmGamPoi::test_de(fit = fit, contrast = paste0('grouping', ref_grp))
   res <- dplyr::rename(res, feature = name, FDR = adj_pval) %>%
-    select(feature, pval, FDR)
+    mutate(effect_direction = sign(lfc)) %>%
+    select(feature, pval, FDR, effect_direction)
   return(res)
 }
 
@@ -218,8 +252,8 @@ de_scdeseq <- function(mat, grouping) {
   
   res <- as.data.frame(DESeq2::results(dds)) %>% tibble::rownames_to_column(var = 'feature') %>%
     dplyr::rename(pval = pvalue) %>%
-    mutate(FDR = p.adjust(pval, method = 'fdr')) %>%
-    select(feature, pval, FDR)
+    mutate(FDR = p.adjust(pval, method = 'fdr'), effect_direction = sign(log2FoldChange)) %>%
+    select(feature, pval, FDR, effect_direction)
 }
 
 de_scedger_lrt <- function(mat, grouping) {
@@ -245,8 +279,8 @@ de_scedger_qlfdetrate <- function(mat, grouping) {
   test_res <- edgeR::glmQLFTest(fit)
   res <- test_res$table %>% tibble::rownames_to_column(var = 'feature') %>%
     dplyr::rename(pval = PValue) %>%
-    mutate(FDR = p.adjust(pval, method = 'fdr')) %>%
-    select(feature, pval, FDR)
+    mutate(FDR = p.adjust(pval, method = 'fdr'), effect_direction = sign(logFC)) %>%
+    select(feature, pval, FDR, effect_direction)
   return(res)
 }
 
@@ -318,8 +352,8 @@ de_edger <- function(mat, grouping, test_type) {
   
   res <- test_res$table %>% tibble::rownames_to_column(var = 'feature') %>%
     dplyr::rename(pval = PValue) %>%
-    mutate(FDR = p.adjust(pval, method = 'fdr')) %>%
-    select(feature, pval, FDR)
+    mutate(FDR = p.adjust(pval, method = 'fdr'), effect_direction = sign(logFC)) %>%
+    select(feature, pval, FDR, effect_direction)
   return(res)
 }
 
@@ -345,8 +379,8 @@ de_limma <- function(mat, grouping, test_type) {
   res <- data.frame(feature = rownames(fit$p.value),
                     pval = fit$p.value[, ncol(design)], 
                     row.names = NULL) %>% 
-    mutate(FDR = p.adjust(pval, method = 'fdr')) %>%
-    select(feature, pval, FDR)
+    mutate(FDR = p.adjust(pval, method = 'fdr'), effect_direction = sign(fit$t[, ncol(design)])) %>%
+    select(feature, pval, FDR, effect_direction)
   return(res)
 }
 
@@ -400,8 +434,8 @@ de_deseq <- function(mat, grouping, test_type) {
   
   res <- as.data.frame(DESeq2::results(dds)) %>% tibble::rownames_to_column(var = 'feature') %>%
     dplyr::rename(pval = pvalue) %>%
-    mutate(FDR = p.adjust(pval, method = 'fdr')) %>%
-    select(feature, pval, FDR)
+    mutate(FDR = p.adjust(pval, method = 'fdr'), effect_direction = sign(log2FoldChange)) %>%
+    select(feature, pval, FDR, effect_direction)
 }
 
 de_deseq_wald_3pr <- function(mat, grouping) {
