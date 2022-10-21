@@ -83,6 +83,24 @@ class_stats <- function(prediction, reference, FDR = NULL, JS = TRUE) {
   return(res)
 }
 
+# assumes three states: -1, 0, 1
+three_way_confusion <- function(prediction, reference) {
+  tab <- table(reference, prediction)
+  OD <- tab[1,3] + tab[3,1]  # opposite effect direction
+  TP <- tab[1,1] + tab[3,3]
+  FN <- tab[1,2] + tab[3,2] + OD
+  FP <- tab[2,1] + tab[2,3] + OD
+  TN <- length(reference) - TP - FN - FP
+  return(data.frame(TP=TP, FN=FN, FP=FP, TN=TN, OD=OD))
+}
+
+perf_metrics <- function(prediction, reference) {
+  data.frame(n = length(reference)) %>%
+    bind_cols(three_way_confusion(prediction, reference)) %>%
+    mutate(Precision = TP / (TP + FP), Sensitivity = TP / (TP + FN),
+           GSS = gilbert_skill_score(TP, FN, FP, TN))
+}
+
 # subset a list of genesets to those that are offspring of a specific go_id
 # genesets is a named list of character vectors, the names contain the gene set ids
 subset_go_genesets <- function(genesets, go_id) {

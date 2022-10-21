@@ -124,15 +124,32 @@ And a list of the ImmuneSigDB genesets that are relevant to the cell type compar
 ```{r}
 sigdb_genesets <- readRDS(sigdb_file)
 x <- names(sigdb_genesets)
+
+get_isigdb_sets <- function(set_names, term_a, term_b, exclude_terms) {
+  sel_sets <- x[grepl(pattern = term_a, x = set_names) & 
+                grepl(pattern = term_b, x = set_names) & 
+                !grepl(pattern = exclude_terms, x = set_names)]
+  # the sets have a directionality, order them relative to term_b
+  b_pos <- lapply(stringr::str_split(string = sel_sets, pattern = '_VS_'), function(x) which(grepl(pattern = term_b, x = x)))
+  set_up <- grepl(pattern = '_UP$', x = sel_sets)
+  # if b_pos is 1 and set is up, then we have markers for term_b
+  ret <- list()
+  for (i in 1:length(b_pos)) {
+    if ( (b_pos[i] == 1 & set_up[i]) | (b_pos[i] == 2 & !set_up[i]) ) {
+      ret[[term_b]] <- c(ret[[term_b]], sel_sets[i])
+    } else {
+      ret[[term_a]] <- c(ret[[term_a]], sel_sets[i])
+    }
+  }
+  return(ret)
+}
+
+exclude_terms <- 'VACCINE|PROGENITOR|LUPUS'
 expected_isig <- list()
-expected_isig$T_CELLS_vs_B_CELLS <- x[grepl(pattern = 'TCELL', x = x) & 
-                                      grepl(pattern = 'BCELL', x = x) & 
-                                      !grepl(pattern = 'LUPUS', x = x)]
-expected_isig$T_CELLS_vs_MONOCYTES <- x[grepl(pattern = 'TCELL', x = x) & 
-                                        grepl(pattern = 'MONOCYTE', x = x)]
-expected_isig$MONOCYTES_vs_B_CELLS <- x[grepl(pattern = 'BCELL', x = x) & 
-                                        grepl(pattern = 'MONOCYTE', x = x) & 
-                                        !grepl(pattern = 'VACCINE', x = x)]
+expected_isig$T_CELLS_vs_B_CELLS <- get_isigdb_sets(set_names = x, term_a = 'BCELL', term_b = 'TCELL', exclude_terms = exclude_terms)
+expected_isig$T_CELLS_vs_MONOCYTES <- get_isigdb_sets(set_names = x, term_a = 'TCELL', term_b = 'MONOCYTE', exclude_terms = exclude_terms)
+expected_isig$MONOCYTES_vs_B_CELLS <- get_isigdb_sets(set_names = x, term_a = 'MONOCYTE', term_b = 'BCELL', exclude_terms = exclude_terms)
+
 print(expected_isig)
 
 sigdb_expected_file <- file.path(GS_DIR, 'IMMUNESIGDB_genesets_expected.Rds')

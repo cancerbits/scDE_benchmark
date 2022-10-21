@@ -65,13 +65,15 @@ for (experiment in experiments) {
              pval = case_when(is.na(pval) ~ 1, TRUE ~ pval),
              FDR = p.adjust(pval, method = 'fdr'),
              pred_de = factor(FDR < 0.05, levels = c(FALSE, TRUE)),
-             true_de = factor(!is.na(logFC), levels = c(FALSE, TRUE)))
+             pred_de3 = factor(effect_direction * (FDR < 0.05), levels = c(-1, 0, 1)),
+             true_de = factor(!is.na(logFC), levels = c(FALSE, TRUE)),
+             true_de3 = factor(case_when(is.na(logFC) ~ 0, logFC > 0 ~ 1, logFC < 0 ~ -1), levels = c(-1, 0, 1)))
     
-    performance <- summarise(de_res, n = n(), class_stats(pred_de, true_de, FDR)) %>%
+    performance <- summarise(de_res, perf_metrics(pred_de3, true_de3)) %>%
       mutate(time_trans = transformation_time, time_de = method_time)
     
     performance_strat <- group_by(de_res, expr_grp) %>%
-      summarise(n = n(), class_stats(pred_de, true_de, FDR), .groups = 'drop')
+      summarise(perf_metrics(pred_de3, true_de3), .groups = 'drop')
     
     performance_sum <- dplyr::bind_rows(performance, performance_strat) %>%
       mutate(experiment = experiment, replicate = replicate, transformation = transformation, de_method = de_method, pipeline = pipeline)

@@ -19,6 +19,7 @@ source('R/utilities.R')
 
 library('dplyr')
 library('future.apply')
+library('canceRbits')
 
 DATA_DIR <- file.path(config$out_root, 'immune_data')
 RES_DIR <- file.path(config$out_root, 'results', 'immune_data')
@@ -80,10 +81,32 @@ for (comp in comps) {
     de_res <- res$res %>% 
       mutate(pval = case_when(is.na(pval) ~ 1, TRUE ~ pval),
              FDR = p.adjust(pval, method = 'fdr'),
-             pred_de = FDR < 0.05)
+             pred_de = FDR < 0.05,
+             pred_de3 = factor(effect_direction * (FDR < 0.05), levels = c(-1, 0, 1)))
     
     gsea_res <- de_res %>% 
       summarise(cb_hyper(signature = as.character(feature[pred_de]), 
+                         background = as.character(feature), 
+                         genesets = genesets, 
+                         collapse = FALSE, 
+                         min_size = 3, 
+                         max_size = Inf, 
+                         verbose = TRUE)) %>%
+      select(-hits) %>%
+      mutate(transformation = transformation, de_method = de_method, pipeline = pipeline)
+    
+    gsea_res_pos <- de_res %>% 
+      summarise(cb_hyper(signature = as.character(feature[pred_de3 == 1]), 
+                         background = as.character(feature), 
+                         genesets = genesets, 
+                         collapse = FALSE, 
+                         min_size = 3, 
+                         max_size = Inf, 
+                         verbose = TRUE)) %>%
+      select(-hits) %>%
+      mutate(transformation = transformation, de_method = de_method, pipeline = pipeline)
+    gsea_res_neg <- de_res %>% 
+      summarise(cb_hyper(signature = as.character(feature[pred_de3 == -1]), 
                          background = as.character(feature), 
                          genesets = genesets, 
                          collapse = FALSE, 
