@@ -64,11 +64,18 @@ print(comps)
 for (comp in comps) {
   message(comp)
   
+  # extract the celltypes being compared; also fix the names to match what isigDB uses
+  comp_types <- stringr::str_split(string = comp, pattern = '_vs_')[[1]] %>%
+    stringr::str_remove(pattern = '_') %>%
+    stringr::str_remove(pattern = 'S$')
+  
   # merge GOBP and relevant isigDB gene sets
-  genesets <- c(gobp_genesets, sigdb_genesets[ names(sigdb_genesets) %in% sigdb_expected_genesets[[comp]] ])
+  #comp_sigdb <- unlist(sigdb_expected_genesets[[comp]])
+  #genesets <- c(gobp_genesets, sigdb_genesets[ comp_sigdb ])
   
   # run GSEA per DE pipeline
   rds_files <- list.files(path = RES_DIR, pattern = paste0('^', comp, '.*\\.Rds$'), full.names = TRUE)
+  # for testing: f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-edger_qlf_7pr.Rds"
   
   gsea_list <- future_lapply(rds_files, FUN = function(f) {
     
@@ -84,16 +91,11 @@ for (comp in comps) {
              pred_de = FDR < 0.05,
              pred_de3 = factor(effect_direction * (FDR < 0.05), levels = c(-1, 0, 1)))
     
-    gsea_res <- de_res %>% 
-      summarise(cb_hyper(signature = as.character(feature[pred_de]), 
-                         background = as.character(feature), 
-                         genesets = genesets, 
-                         collapse = FALSE, 
-                         min_size = 3, 
-                         max_size = Inf, 
-                         verbose = TRUE)) %>%
-      select(-hits) %>%
-      mutate(transformation = transformation, de_method = de_method, pipeline = pipeline)
+    # run gsea twice; once per effect direction; then merge and keep highest ranking result for the GOBP sets
+    
+    # merge GOBP and relevant isigDB gene sets for direction 1
+    comp_sigdb <- sigdb_expected_genesets[[comp]][[comp_types[2]]]
+    genesets <- c(gobp_genesets, sigdb_genesets[ comp_sigdb ])
     
     gsea_res_pos <- de_res %>% 
       summarise(cb_hyper(signature = as.character(feature[pred_de3 == 1]), 
@@ -105,6 +107,11 @@ for (comp in comps) {
                          verbose = TRUE)) %>%
       select(-hits) %>%
       mutate(transformation = transformation, de_method = de_method, pipeline = pipeline)
+    
+    # merge GOBP and relevant isigDB gene sets for direction 1
+    comp_sigdb <- sigdb_expected_genesets[[comp]][[comp_types[1]]]
+    genesets <- c(gobp_genesets, sigdb_genesets[ comp_sigdb ])
+    
     gsea_res_neg <- de_res %>% 
       summarise(cb_hyper(signature = as.character(feature[pred_de3 == -1]), 
                          background = as.character(feature), 
@@ -115,7 +122,13 @@ for (comp in comps) {
                          verbose = TRUE)) %>%
       select(-hits) %>%
       mutate(transformation = transformation, de_method = de_method, pipeline = pipeline)
-      
+    
+    gsea_res <- bind_rows(gsea_res_pos, gsea_res_neg) %>%
+      group_by(label) %>%
+      slice_min(order_by = pval) %>%
+      ungroup() %>%
+      arrange(pval)
+    
     return(gsea_res)
     
   }, future.seed=TRUE)
@@ -125,7 +138,7 @@ for (comp in comps) {
     mutate(is_gobp = grepl(pattern = '\\(GO:\\d+\\)$', x = label),
            is_gobp_immune = label %in% gobp_immune_genesets,
            is_gobp_unspecific = label %in% gobp_unspecific,
-           is_sigdb_expected = label %in% sigdb_expected_genesets[[comp]])
+           is_sigdb_expected = label %in% unlist(sigdb_expected_genesets[[comp]]))
   saveRDS(gsea_res, file = file.path(OUT_DIR, sprintf('gsea_%s.Rds', comp))) 
 }
 ```

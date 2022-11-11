@@ -43,13 +43,13 @@ dir.create(report_dir, recursive = TRUE, showWarnings = FALSE)
 #                   envir = new.env())
 
 # prep the GSEA evaluation
-rmarkdown::render(input = 'Rmd/prep_GSEA.Rmd',
-                  output_dir = report_dir,
-                  knit_root_dir = config$project_root,
-                  envir = new.env())
-
-# summarize results on the immune data
-# rmarkdown::render(input = 'Rmd/summarize_results_on_immune_data.Rmd',
+# rmarkdown::render(input = 'Rmd/prep_GSEA.Rmd',
 #                   output_dir = report_dir,
 #                   knit_root_dir = config$project_root,
 #                   envir = new.env())
+
+# summarize results on the immune data
+rmarkdown::render(input = 'Rmd/summarize_results_on_immune_data.Rmd',
+                  output_dir = report_dir,
+                  knit_root_dir = config$project_root,
+                  envir = new.env())

@@ -119,7 +119,7 @@ gobp_immune_file <- file.path(GS_DIR, 'GO_Biological_Process_2021_immune.Rds')
 saveRDS(object = gobp_immune_genesets, file = gobp_immune_file)
 ```
 
-And a list of the ImmuneSigDB genesets that are relevant to the cell type comparisons we are doing
+And a list of the ImmuneSigDB genesets that are relevant to the cell type comparisons we are doing. Since the genesets have a direction, each comparison will have two entries with positive markers for the specific cell type.
 
 ```{r}
 sigdb_genesets <- readRDS(sigdb_file)
