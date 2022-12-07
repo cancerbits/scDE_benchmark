@@ -144,6 +144,32 @@ for (comp in comps) {
 ```
 
 
+## Collect the timing
+
+```{r}
+timing_list <- list()
+
+for (comp in comps) {
+  message(comp)
+  
+  rds_files <- list.files(path = RES_DIR, pattern = paste0('^', comp, '.*\\.Rds$'), full.names = TRUE)
+
+  timing_res <- lapply(rds_files, FUN = function(f) {
+    timing <- readRDS(f)$timing
+    data.frame(transformation = filter(timing, step == 'transformation')$name,
+               de_method = filter(timing, step == 'de_method')$name,
+               transformation_time = filter(timing, step == 'transformation')$time,
+               de_method_time = filter(timing, step == 'de_method')$time) %>%
+      mutate(time = transformation_time + de_method_time, comp = comp)
+  }) %>% bind_rows()
+  
+  timing_list[[comp]] <- timing_res
+}
+
+timing_res <- bind_rows(timing_list)
+saveRDS(timing_res, file = file.path(OUT_DIR, 'timing_results.Rds')) 
+```
+
 # Appendix
 
 Runtime: `r time_diff(SETUP_TIME)`

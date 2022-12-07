@@ -177,6 +177,7 @@ de_lrt <- function(mat, grouping) {
 # MAST
 de_mast <- function(mat, grouping) {
   ref_grp <- levels(grouping)[2]
+  contr <- paste0('group', ref_grp)
   # MAST is noisy (several messages) - shut it up
   suppressMessages({
     sca <- MAST::FromMatrix(
@@ -186,16 +187,14 @@ de_mast <- function(mat, grouping) {
       fData = data.frame(name = rownames(mat))
     )
     zlmCond <- MAST::zlm(formula = ~ group, sca = sca)
-    summaryCond <- MAST::summary(object = zlmCond, doLRT = paste0('group', ref_grp))}
+    summaryCond <- MAST::summary(object = zlmCond, doLRT = contr)}
   )
-  summaryDt <- left_join(
-    summaryCond$datatable %>% filter(component == 'H') %>% select(primerid, `Pr(>Chisq)`),
-    summaryCond$datatable %>% filter(component == 'logFC') %>% select(primerid, coef),
-    by = 'primerid'
-  )
-  res <- data.frame(feature = rownames(mat)) %>%
+  summaryDt <- filter(summaryCond$datatable, contrast == contr, component %in% c('D', 'H', 'logFC')) %>% 
+    tidyr::pivot_wider(id_cols = primerid, names_from = component, values_from = c(`Pr(>Chisq)`, coef))
+  res <- data.frame(feature = rownames(mat)) %>% 
     left_join(summaryDt, by = c('feature' = 'primerid')) %>%
-    mutate(pval = `Pr(>Chisq)`, FDR = p.adjust(p = pval, method = 'fdr'), effect_direction = sign(coef)) %>%
+    mutate(pval = `Pr(>Chisq)_H`, FDR = p.adjust(p = pval, method = 'fdr'), 
+           effect_direction = case_when(is.nan(coef_logFC) ~ sign(coef_D), TRUE ~ sign(coef_logFC))) %>%
     select(feature, pval, FDR, effect_direction)
   return(res)
 }
