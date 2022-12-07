@@ -1,0 +1,344 @@
+---
+title: 'Pipeline ranking on immune data with blueprint as truth'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+source('R/utilities.R')
+
+library('dplyr')
+library('ComplexHeatmap')
+
+BP_DIR <- file.path(config$out_root, 'results', 'immune_data_blueprint')
+RES_DIR <- file.path(config$out_root, 'results', 'immune_data')
+FIG_DIR <- file.path(config$out_root, 'figures')
+FIG_SUPP_DIR <- file.path(config$out_root, 'figures', 'supp')
+dir.create(path = FIG_SUPP_DIR, showWarnings = FALSE, recursive = TRUE)
+```
+
+# Main
+
+## Load the bulk data results
+
+```{r}
+bp_res <- readRDS(file = file.path(BP_DIR, 'blueprint_immune_comparisons.Rds'))
+bp_res_names <- sapply(bp_res, function(x) paste(x$comp[1], x$comp[2], sep = '_vs_'))
+names(bp_res) <- bp_res_names
+print(bp_res_names)
+```
+
+
+## Process the pipeline results
+
+We do this per comparison
+```{r}
+comps <- list.files(path = RES_DIR, full.names = FALSE) %>%
+  stringr::str_extract(pattern = '^[^-]+') %>%
+  unique()
+print(comps)
+```
+
+```{r}
+for (comp in comps) {
+  message(comp)
+  
+  # extract the celltypes being compared; 
+  # also fix the comparison order as used in the blueprint comparisons
+  comp_types <- stringr::str_split(string = comp, pattern = '_vs_')[[1]] 
+  comp_ordered <- paste(sort(comp_types), collapse = '_vs_')
+  
+  # get the blueprint results
+  bp_de_res <- bp_res[[comp_ordered]]$de_res
+  
+  # run GSEA per DE pipeline
+  rds_files <- list.files(path = RES_DIR, pattern = paste0('^', comp, '.*\\.Rds$'), full.names = TRUE)
+  # for testing: f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-edger_qlf_7pr.Rds"
+  f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-edger_qlf_7pr.Rds"
+  f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-sum1-mast.Rds"
+  res <- readRDS(f)
+  de_res <- res$res %>% 
+    mutate(pval = case_when(is.na(pval) ~ 1, TRUE ~ pval),
+           FDR = p.adjust(pval, method = 'fdr'),
+           pred_de = FDR < 0.05,
+           pred_de3 = factor(effect_direction * (FDR < 0.05), levels = c(-1, 0, 1)))
+  
+  de_res <- left_join(de_res, bp_de_res, by = c('feature' = 'symbol')) %>%
+    filter(). # filter out NA in grp1, grp2 (non-matching gene names)?
+  table(de_res$pred_de3, de_res$grp1 == 0, useNA = 'always')
+  table(de_res$pred_de3, de_res$grp2 == 0, useNA = 'always')
+  table(de_res$pred_de3, de_res$grp1 == 1, useNA = 'always')
+  table(de_res$pred_de3, de_res$grp2 == 1, useNA = 'always')
+  
+  # proxy for precision: fraction of DE genes that is in core bulk DE set
+  # proxy for sensitivity: fraction of core bulk DE set that is DE
+  if (comp_ordered != comp) {
+    de_res <- mutate(de_res, bulk_de3 = grp1 - grp2)
+  } else {
+    de_res <- mutate(de_res, bulk_de3 = grp2 - grp1)
+  }
+  
+  summarise(de_res, prec = )
+  
+  all_feats <- c(bp_de_res$symbol, de_res$feature)
+  com_feats <- intersect(bp_de_res$symbol, de_res$feature)
+  table(de_res$feature %in% com_feats)
+  table(bp_de_res$symbol %in% com_feats)
+  
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+## Load summarized results
+```{r}
+res_files <- list.files(path = RES_DIR, pattern = '^gsea_.+\\.Rds$', full.names = TRUE)
+gsea_res <- lapply(res_files, function(x) {
+  comp <- stringr::str_remove_all(string = basename(x), pattern = '^gsea_|\\.Rds$')
+  readRDS(file = x) %>%
+    mutate(comp = comp)
+}) %>% bind_rows()
+```
+
+## Calculate scores
+
+### relevance (specificity)
+
+Get fraction of unspecific sets among all enriched ones; relevance score is one minus unspecific fraction
+```{r}
+sum1 <- group_by(gsea_res, comp, transformation, de_method, pipeline) %>%
+  filter(fdr < 0.05, is_gobp) %>%
+  summarise(n = n(), n_unspec = sum(is_gobp_unspecific), 
+            relevance = 1 - n_unspec / n, .groups = 'drop')
+```
+
+### recovery (immunesigdb ranks aka sensitivity)
+
+Get ranks of expected IMMUNESIGDB sets
+```{r}
+sum2 <- group_by(gsea_res, comp, transformation, de_method, pipeline) %>%
+  filter(!(is_gobp_immune)) %>%
+  mutate(fdr = p.adjust(p = pval, method = 'fdr')) %>%
+  arrange(pval, overlap, .by_group = TRUE) %>%
+  mutate(set_rank = 1:n()) %>%
+  summarise(isig_n = sum(is_sigdb_expected),
+            isig_sig = sum(fdr < 0.05 & is_sigdb_expected, na.rm = TRUE), 
+            isig_top_n = sum(is_sigdb_expected[1:isig_n]),
+            isig_top_2n = sum(is_sigdb_expected[1:(2*isig_n)]),
+            isig_med_rank = median(set_rank[is_sigdb_expected]),
+            isig_avg_rank = mean(set_rank[is_sigdb_expected]), .groups = 'drop')
+```
+
+### Combine
+```{r}
+gsea_sum <- left_join(sum1, sum2)
+#saveRDS(gsea_sum, 
+#        file = file.path(config$out_root, 'immune_gsea_results_summary.Rds'))
+```
+
+Derive a combined score
+```{r}
+fr <- group_by(gsea_sum, transformation, de_method, pipeline) %>%
+  summarise(score = mean(relevance) + mean(isig_top_n/isig_n)) %>%
+  #summarise(score = mean(relevance) + mean(isig_sig/isig_n)) %>%
+  ungroup() %>%
+  arrange(-score)
+fr
+```
+
+Add time
+```{r}
+# load and sum per pipeline
+timing_res <- readRDS(file = file.path(RES_DIR, 'timing_results.Rds')) %>%
+  mutate(pipeline = paste(transformation, de_method, sep = '-')) %>%
+  group_by(pipeline) %>%
+  summarise(time = sum(time), time_n = n(), .groups = 'drop')
+
+table(timing_res$time_n)
+
+fr <- left_join(fr, timing_res, by = 'pipeline')
+```
+
+We want to show Relevance and Recovery per pipeline per comparison
+```{r}
+rel_rec <- group_by(gsea_sum, comp, transformation, de_method, pipeline) %>%
+  summarise(Relevance = relevance, Recovery = isig_top_2n/isig_n, .groups = 'drop')
+```
+
+Get data into wide format
+```{r}
+rel_rec_wide <- arrange(rel_rec, comp) %>%
+                  tidyr::pivot_wider(
+                              id_cols = c(pipeline, transformation, de_method),
+                              names_from = c(comp, comp), 
+                              values_from = c(Relevance, Recovery)) %>%
+  select(-transformation, -de_method) 
+```
+
+Define the main plotting function
+```{r}
+library('ComplexHeatmap')
+res_heatmap <- function(fr, rel_rec_wide, idx = 1:nrow(fr), do_rescale = TRUE,
+                        filename = NULL, fig_width = 7, fig_height = 32) {
+  fr <- fr[idx, ]
+  
+  mat <- as.matrix(left_join(fr, rel_rec_wide, by = 'pipeline') %>%
+                   select(starts_with(c("Rel", "Rec"))))
+  rownames(mat) <- as.character(fr$pipeline)
+  colnames(mat) <- stringr::str_remove(colnames(mat), '^Relevance_|^Recovery_')
+  colnames(mat) <- stringr::str_replace_all(colnames(mat), pattern = '_', replacement = ' ')
+  colnames(mat) <- gsub("(^|[[:space:]])([[:alpha:]])", "\\1\\U\\2", colnames(mat), perl=TRUE)
+  colnames(mat) <- stringr::str_replace_all(colnames(mat), pattern = 'Vs', replacement = 'vs')
+  
+  # create a scaled version for the colors
+  if (do_rescale) {
+    mat_rescaled <- apply(mat, 2, scales::rescale)
+    heatmap_legend_param <- list(
+            title = 'Column-\nrescaled\nvalue', at = c(0, 1), 
+            labels = c("Worst", "Best"), border = FALSE)
+  } else {
+    mat_rescaled <- mat
+    heatmap_legend_param <- list(title = 'Value')
+  }
+  
+  
+  # create a function print the values in each heatmap cell
+  cell_fun = function(j, i, x, y, width, height, fill) {
+            grid.text(sprintf("%2.0f", mat[i, j]*100), x, y, 
+                      gp = gpar(fontsize = 8, 
+                                col = c('white', 'black')[(mat_rescaled[i, j] > 0.4) + 1]))
+  }
+  
+  ta = HeatmapAnnotation(foo = anno_block(
+    gp = gpar(fill = 'gray'),
+    labels = c("Relevance", "Recovery"), 
+    labels_gp = gpar(col = "black", fontsize = 10)))
+  
+  anno_right <- rowAnnotation(
+    #GSS = anno_barplot(fr$GSS, bar_width = 1),
+    #FDR_low = anno_barplot(fr$FDR_low, bar_width = 1),
+    #FDR_high = anno_barplot(fr$FDR_high, bar_width = 1),
+    Time = anno_barplot(fr$time, bar_width = 1),
+    annotation_name_rot = 0,
+    annotation_name_side = 'top')
+  
+  anno_left <- rowAnnotation(
+    Transformation = anno_text(fr$transformation, 
+                               just = "left", show_name = TRUE, 
+                               width = unit(25, 'mm'), 
+                               gp = gpar(fontsize = 11)),
+    `DE method` = anno_text(fr$de_method, 
+                           just = "left", show_name = TRUE,
+                           gp = gpar(fontsize = 11)), 
+    PB = grepl(pattern = '\\dpr', fr$de_method),
+    col = list(PB = c("FALSE" = "white", "TRUE" = "black")),
+    gap = unit(10, "points"),
+    annotation_name_rot = 0,
+    annotation_name_align = TRUE,
+    annotation_name_side = 'top',
+    show_legend = FALSE)
+  
+  
+  ch <- Heatmap(mat_rescaled, cluster_columns = FALSE, cluster_rows = FALSE,
+          show_row_names = FALSE, show_column_names = TRUE, column_names_rot = 45,
+          col = hcl.colors(n = 21, palette = 'viridis'),
+          name = 'Value', column_title = NULL,
+          column_split = rep(c("A", "B"), each = ncol(mat)/2),
+          top_annotation = ta, right_annotation = anno_right,
+          left_annotation = anno_left,
+          cell_fun = cell_fun,
+          heatmap_legend_param = heatmap_legend_param)
+  
+  if (!is.null(filename)) {
+    cairo_pdf(filename = filename, width = fig_width, height = fig_height)
+    show(ch)
+    dev.off()
+  }
+  return(ch)
+}
+```
+
+Big heatmap
+```{r}
+ch <- res_heatmap(fr, rel_rec_wide, 
+                  filename = file.path(FIG_DIR, 'ranking_immune_data_big.pdf'), 
+                  fig_width = 6, fig_height = 42)
+```
+
+PB vs non-PB
+```{r}
+pb = grepl(pattern = '\\dpr+', fr$de_method)
+ch <- res_heatmap(fr, rel_rec_wide, idx = which(pb),
+                  filename = file.path(FIG_DIR, 'ranking_immune_data_big_pb.pdf'), 
+                  fig_width = 6, fig_height = 16)
+ch <- res_heatmap(fr, rel_rec_wide, idx = which(!pb),
+                  filename = file.path(FIG_DIR, 'ranking_immune_data_big_sc.pdf'), 
+                  fig_width = 6, fig_height = 22)
+```
+
+Create reduced heatmaps
+
+```{r}
+fr$de_method_grp1 = stringr::str_remove_all(string = fr$de_method, pattern = '\\d+(?=pr)')
+table(fr$de_method_grp1)
+
+idx <- mutate(fr, idx = 1:nrow(fr)) %>%
+  group_by(de_method_grp1) %>%
+  slice_min(order_by = idx) %>%
+  pull(idx) %>% sort()
+
+ch <- res_heatmap(fr, rel_rec_wide, idx = idx,
+                  filename = file.path(FIG_DIR, 'ranking_immune_data_filter1.pdf'), 
+                  fig_width = 7, fig_height = 6)
+
+fr <- mutate(fr, de_method_grp2 = stringr::str_remove_all(string = de_method_grp1, pattern = '_(lrt|wald|exact|qlf|trend|voom)$'))
+fr <- mutate(fr, de_method_grp2 = stringr::str_remove_all(string = de_method_grp2, pattern = '_(ns|pc|dc|pf|10k|gm)'))
+table(fr$de_method_grp2)
+
+idx <- mutate(fr, idx = 1:nrow(fr)) %>%
+  group_by(de_method_grp2) %>%
+  slice_min(order_by = idx) %>%
+  pull(idx) %>% sort()
+
+ch <- res_heatmap(fr, rel_rec_wide, idx = idx,
+                  filename = file.path(FIG_DIR, 'ranking_immune_data_filter2.pdf'), 
+                  fig_width = 7, fig_height = 4)
+```
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```
+
+Future plan
+```{r}
+future::plan()
+```
+
+More session info
+```{r}
+devtools::session_info()
+```

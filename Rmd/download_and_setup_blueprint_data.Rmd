@@ -1,0 +1,251 @@
+---
+title: 'Download and DE-compare blueprint immune data'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+library('dplyr')
+library('Seurat')
+library('canceRbits')
+library('patchwork')
+source('R/utilities.R')
+source('R/de_methods.R')
+#source('R/transformations.R')
+
+DATA_DIR <- file.path(config$out_root, 'immune_data')
+GS_DIR <- file.path(config$out_root, 'geneset_data')
+RES_DIR <- file.path(config$out_root, 'results', 'immune_data_blueprint')
+dir.create(path = RES_DIR, showWarnings = FALSE, recursive = TRUE)
+```
+
+# Download blueprint meta data and expression
+
+```{r}
+md_url <- 'http://dcc.blueprint-epigenome.eu/data/blueprint_files.tsv'
+md <- readr::read_tsv(file = md_url, show_col_types = FALSE)
+```
+
+Subset to cell types of interest
+
+B cells
+```{r}
+b_cell_samples <- filter(md, Tissue == 'venous blood', stringr::str_detect(`Cell type`, pattern = 'B cell'), `File type` == 'Transcription quantification (Genes)')
+b_cell_samples
+
+b_cell_mat <- sapply(b_cell_samples$URL, function(rsem_url) {
+  tmp <- readr::read_tsv(file = rsem_url, show_col_types = FALSE)
+  out <- tmp$expected_count
+  names(out) <- tmp$gene_id
+  return(out)
+})
+colnames(b_cell_mat) <- make.names(paste(b_cell_samples$Donor, 
+                                         b_cell_samples$`Cell type`, 
+                                         1:nrow(b_cell_samples), sep = '_'))
+```
+
+T cells
+```{r}
+t_cell_samples <- filter(md, Tissue == 'venous blood', stringr::str_detect(`Cell type`, pattern = 'T cell'), `File type` == 'Transcription quantification (Genes)')
+t_cell_samples
+
+t_cell_mat <- sapply(t_cell_samples$URL, function(rsem_url) {
+  tmp <- readr::read_tsv(file = rsem_url, show_col_types = FALSE)
+  out <- tmp$expected_count
+  names(out) <- tmp$gene_id
+  return(out)
+})
+colnames(t_cell_mat) <- make.names(paste(t_cell_samples$Donor, 
+                                         t_cell_samples$`Cell type`, 
+                                         1:nrow(t_cell_samples), sep = '_'))
+```
+
+Monocytes
+```{r}
+monocyte_samples <- filter(md, Tissue == 'venous blood', stringr::str_detect(`Cell type`, pattern = '^[mM]onocyte'), `File type` == 'Transcription quantification (Genes)')
+monocyte_samples
+
+monocyte_mat <- sapply(monocyte_samples$URL, function(rsem_url) {
+  tmp <- readr::read_tsv(file = rsem_url, show_col_types = FALSE)
+  out <- tmp$expected_count
+  names(out) <- tmp$gene_id
+  return(out)
+})
+colnames(monocyte_mat) <- make.names(paste(monocyte_samples$Donor, 
+                                         monocyte_samples$`Cell type`, 
+                                         1:nrow(monocyte_samples), sep = '_'))
+```
+
+Combine the matrices and meta data
+
+```{r}
+b_cell_samples$immune_group <- 'B_CELLS'
+t_cell_samples$immune_group <- 'T_CELLS'
+monocyte_samples$immune_group <- 'MONOCYTES'
+bp_md <- rbind(b_cell_samples, t_cell_samples, monocyte_samples) %>%
+  mutate(sample_id = sprintf('bp_%02d', 1:n()))
+
+bp_mat <- cbind(b_cell_mat, t_cell_mat, monocyte_mat)
+colnames(bp_mat) <- bp_md$sample_id
+
+table(bp_md$`Sub-group`, bp_md$immune_group)
+table(bp_md$immune_group)
+```
+
+Save
+
+```{r}
+outf <- file.path(DATA_DIR, 'blueprint_data.Rds')
+saveRDS(object = list(expected_counts = bp_mat, meta_data = bp_md), file = outf)
+```
+
+# Run DE and GSEA analysis
+
+Download gene sets
+```{r}
+# gobp_url <- 'https://maayanlab.cloud/Enrichr/geneSetLibrary?mode=text&libraryName=GO_Biological_Process_2021'
+# gobp_file <- file.path(GS_DIR, paste0(stringr::str_extract(gobp_url, pattern = '[^=]+$'), '.tsv'))
+# if (!file.exists(gobp_file)) {
+#   download.file(url = gobp_url, destfile = gobp_file)
+# }
+# 
+# reactome_url <- 'https://maayanlab.cloud/Enrichr/geneSetLibrary?mode=text&libraryName=Reactome_2022'
+# reactome_file <- file.path(GS_DIR, paste0(stringr::str_extract(reactome_url, pattern = '[^=]+$'), '.tsv'))
+# if (!file.exists(reactome_file)) {
+#   download.file(url = reactome_url, destfile = reactome_file)
+# }
+# 
+# chea_url <- 'https://maayanlab.cloud/Enrichr/geneSetLibrary?mode=text&libraryName=ChEA_2022'
+# chea_file <- file.path(GS_DIR, paste0(stringr::str_extract(chea_url, pattern = '[^=]+$'), '.tsv'))
+# if (!file.exists(chea_file)) {
+#   download.file(url = chea_url, destfile = chea_file)
+# }
+# 
+# gtex_url <- 'https://maayanlab.cloud/Enrichr/geneSetLibrary?mode=text&libraryName=GTEx_Tissue_Expression_Up'
+# gtex_file <- file.path(GS_DIR, paste0(stringr::str_extract(gtex_url, pattern = '[^=]+$'), '.tsv'))
+# if (!file.exists(gtex_file)) {
+#   download.file(url = gtex_url, destfile = gtex_file)
+# }
+
+wikip_url <- 'https://maayanlab.cloud/Enrichr/geneSetLibrary?mode=text&libraryName=WikiPathway_2021_Human'
+wikip_file <- file.path(GS_DIR, paste0(stringr::str_extract(wikip_url, pattern = '[^=]+$'), '.tsv'))
+if (!file.exists(wikip_file)) {
+  download.file(url = wikip_url, destfile = wikip_file)
+}
+
+GRCH38 <- select(annotables::grch38, ensgene, symbol)
+GRCH38 <- GRCH38[!duplicated(GRCH38), ]
+#GENESETS <- canceRbits::cb_enrichr_gsets(filepath = gobp_file)
+#GENESETS <- canceRbits::cb_enrichr_gsets(filepath = reactome_file)
+#GENESETS <- canceRbits::cb_enrichr_gsets(filepath = chea_file)
+#GENESETS <- canceRbits::cb_enrichr_gsets(filepath = gtex_file)
+GENESETS <- canceRbits::cb_enrichr_gsets(filepath = wikip_file)
+```
+
+Create helper functions to run DE and GSEA
+```{r}
+run_bulk_de <- function(mat, grouping, de_method) {
+  if (de_method == 'edger') {
+    de_res <- de_edger(mat = mat, grouping = grouping, test_type = 'QLF')
+  } else if (de_method == 'deseq') {
+    de_res <- de_deseq(mat = round(mat, 0), grouping = grouping, test_type = 'wald')
+  } else if (de_method == 'limma') {
+    de_res <- de_limma(mat = mat, grouping = grouping, test_type = 'trend')
+  } else {
+    stop('de_method needs to be edger, limma, or deseq')
+  }
+  de_res %>%
+    mutate(ensgene = stringr::str_remove(feature, '\\.\\d+$')) %>%
+    left_join(GRCH38, by = "ensgene") %>%
+    mutate(de_method = factor(de_method), 
+           FDR = case_when(is.na(FDR) ~ 1, 
+                           TRUE ~ FDR),
+           effect_direction = case_when(is.na(effect_direction) ~ 0, 
+                                        TRUE ~ effect_direction)) %>%
+    select(-ensgene) %>%
+    filter(!is.na(symbol), symbol != '') 
+}
+
+de_consensus <- function(mat, grouping) {
+  keep_rows <- rowSums(mat >= 1) > 1
+  mat <- mat[keep_rows, ]
+  de_res <- lapply(c('deseq', 'edger', 'limma'), 
+    function(de_method) run_bulk_de(mat, grouping, de_method)) %>% 
+    bind_rows() %>%
+    group_by(feature, symbol) %>%
+    summarise(grp1 = sum(FDR < 0.05 & effect_direction == -1) / 3,
+              grp2 = sum(FDR < 0.05 & effect_direction == 1) / 3, 
+              .groups = 'drop')
+  return(de_res)
+}
+
+gsea <- function(de_res) {
+  gsea_res1 <- summarise(de_res, canceRbits::cb_hyper(
+    signature = symbol[grp1 >= 1], 
+    background = symbol, 
+    genesets = GENESETS, 
+    min_size = 3, 
+    max_size = Inf, 
+    collapse = FALSE, 
+    verbose = TRUE
+    )) %>%
+    mutate(grp = 1)
+  gsea_res2 <- summarise(de_res, canceRbits::cb_hyper(
+    signature = symbol[grp2 >= 1], 
+    background = symbol, 
+    genesets = GENESETS, 
+    min_size = 3, 
+    max_size = Inf, 
+    collapse = FALSE, 
+    verbose = TRUE
+    )) %>%
+    mutate(grp = 2)
+  return(rbind(gsea_res1, gsea_res2))
+}
+```
+
+
+```{r}
+comps <- list(
+  c('B_CELLS', 'MONOCYTES'),
+  c('B_CELLS', 'T_CELLS'),
+  c('MONOCYTES', 'T_CELLS')
+)
+res <- lapply(comps, function(comp) {
+  cat(comp, '\n')
+  sel <- bp_md$immune_group %in% comp
+  de_res <- de_consensus(mat = bp_mat[, sel], 
+                         grouping = factor(bp_md$immune_group[sel], levels = comp))
+  gsea_res <- gsea(de_res)
+  return(list(comp = comp, de_res = de_res, gsea_res = gsea_res))
+})
+
+outf <- file.path(RES_DIR, 'blueprint_immune_comparisons.Rds')
+saveRDS(object = res, file = outf)
+# gsea_res4 <- gsea(de_res4)
+# table(gsea_res4$fdr < 0.05, gsea_res4$grp)
+# filter(gsea_res4, fdr < 0.05, grp == 1) %>% arrange(fdr) %>% pull(label) %>% head(50)
+# filter(gsea_res4, fdr < 0.05, grp == 2) %>% arrange(fdr) %>% pull(label) %>% head(50)
+```
+
+
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```
