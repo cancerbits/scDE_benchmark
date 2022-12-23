@@ -82,17 +82,130 @@ res <- as_tibble(data.table::rbindlist(res_list)) %>%
   mutate(experiment = factor(experiment, levels = experiment_order))
 ```
 
-Also add FDR column (set to zero if no positives were predicted)
+
+## Some overview plots
+
 ```{r}
-res <- mutate(res, FDR = case_when(FP + TP == 0 ~ 0, TRUE ~ 1 - Precision)) 
+library('ggplot2')
+ggplot(res, aes(Precision, Sensitivity, color = cut(GSS, 11))) + 
+  geom_point() + 
+  scale_color_viridis_d() +
+  facet_grid(expr_grp ~ experiment, scales = 'free')
 ```
+```{r}
+filter(res, is.na(expr_grp)) %>%
+  group_by(experiment) %>%
+  mutate(GSS_rescaled = scales::rescale(scales::oob_squish_any(GSS))) %>%
+  ggplot(aes(Precision, Sensitivity, color = GSS_rescaled)) + 
+  geom_point() + 
+  scale_color_viridis_c() +
+  facet_wrap( ~ experiment, scales = 'free')
+```
+
+```{r}
+filter(res, is.na(expr_grp)) %>%
+  group_by(experiment) %>%
+  mutate(BA_rescaled = scales::rescale(scales::oob_squish_any(BA))) %>%
+  ggplot(aes(Precision, Sensitivity, color = BA_rescaled)) + 
+  geom_point() + 
+  scale_color_viridis_c() +
+  facet_wrap( ~ experiment, scales = 'free')
+```
+
+```{r}
+filter(res, is.na(expr_grp)) %>%
+  group_by(experiment) %>%
+  mutate(F1_rescaled = scales::rescale(scales::oob_squish_any(F1))) %>%
+  ggplot(aes(Precision, Sensitivity, color = F1_rescaled)) + 
+  geom_point() + 
+  scale_color_viridis_c() +
+  facet_wrap( ~ experiment, scales = 'free')
+```
+
+```{r}
+filter(res, is.na(expr_grp)) %>%
+  group_by(experiment) %>%
+  ggplot(aes(Precision, Sensitivity, color = MCC)) + 
+  geom_point() + 
+  scale_color_viridis_c() +
+  facet_wrap( ~ experiment, scales = 'free')
+filter(res, is.na(expr_grp)) %>%
+  group_by(experiment) %>%
+  mutate(MCC_rescaled = scales::rescale(scales::oob_squish_any(MCC))) %>%
+  ggplot(aes(Precision, Sensitivity, color = MCC_rescaled)) + 
+  geom_point() + 
+  scale_color_viridis_c() +
+  facet_wrap( ~ experiment, scales = 'free')
+filter(res, !is.na(expr_grp)) %>%
+  group_by(experiment, expr_grp) %>%
+  mutate(MCC_rescaled = scales::rescale(scales::oob_squish_any(MCC))) %>%
+  ggplot(aes(Precision, Sensitivity, color = MCC_rescaled)) + 
+  geom_point() + 
+  scale_color_viridis_c() +
+  facet_wrap( ~ experiment + expr_grp, scales = 'free', dir = 'v', ncol = 4)
+```
+
+```{r}
+filter(res, is.na(expr_grp)) %>%
+  group_by(experiment) %>%
+  mutate(FM_rescaled = scales::rescale(scales::oob_squish_any(FM))) %>%
+  ggplot(aes(Precision, Sensitivity, color = FM_rescaled)) + 
+  geom_point() + 
+  scale_color_viridis_c() +
+  facet_wrap( ~ experiment, scales = 'free')
+```
+
+```{r}
+filter(res, is.na(expr_grp)) %>%
+  group_by(experiment) %>%
+  mutate(CSI_rescaled = scales::rescale(scales::oob_squish_any(CSI))) %>%
+  ggplot(aes(Precision, Sensitivity, color = CSI_rescaled)) + 
+  geom_point() + 
+  scale_color_viridis_c() +
+  facet_wrap( ~ experiment, scales = 'free')
+```
+
+```{r}
+filter(res, is.na(expr_grp)) %>%
+  group_by(experiment) %>%
+  mutate(PSS_rescaled = scales::rescale(scales::oob_squish_any(PSS))) %>%
+  ggplot(aes(Precision, Sensitivity, color = PSS_rescaled)) + 
+  geom_point() + 
+  scale_color_viridis_c() +
+  facet_wrap( ~ experiment, scales = 'free')
+```
+
+```{r}
+ggplot(res, aes(FDR)) + 
+  geom_histogram(binwidth = 0.02) + 
+  facet_grid(expr_grp ~ experiment, scales = 'free')
+```
+
+## Rank based on MCC
+
+```{r}
+fr <- filter(res, !is.na(expr_grp)) %>%
+  group_by(experiment, expr_grp) %>%
+  mutate(MCC_rescaled = scales::rescale(scales::oob_squish_any(MCC))) %>%
+  group_by(transformation, de_method, pipeline, expr_grp) %>%
+  summarise(n = n(), MCC = mean(MCC_rescaled), .groups = 'drop') %>%
+  tidyr::pivot_wider(id_cols = c(transformation, de_method, pipeline), names_from = expr_grp, values_from = MCC) %>%
+  group_by(transformation, de_method, pipeline) %>%
+  mutate(score = mean(c(low, medium, high))) %>%
+  arrange(-score)
+head(fr, 33) %>% as.data.frame()
+```
+
 
 ## Rank based on GSS and FDR
 
 ```{r}
+# rescale the GSS per experiment
 fr <- filter(res, is.na(expr_grp)) %>%
+  group_by(experiment) %>%
+  mutate(GSS_rescaled = scales::rescale(scales::oob_squish_any(GSS))) %>%
   group_by(transformation, de_method, pipeline) %>%
-  summarise(n = n(), GSS = mean(GSS), .groups = 'drop') 
+  summarise(n = n(), GSS = mean(GSS_rescaled), .groups = 'drop') 
 fdr_low <- filter(res, expr_grp == 'low', experiment == experiment_for_fdr_low) %>%
   group_by(transformation, de_method, pipeline) %>%
   summarise(FDR = mean(FDR), .groups = 'drop') %>%
@@ -142,6 +255,13 @@ prec_sens_wide <- arrange(prec_sens, experiment) %>%
   select(-transformation, -de_method) 
 prec_sens_wide <- left_join(select(fr, pipeline), prec_sens_wide, by = 'pipeline')
 ```
+
+Save final ranking 
+```{r}
+saveRDS(list(fr = fr, metrics_wide = prec_sens_wide), 
+        file = file.path(config$out_root, 'results', 'final_ranking_simulated.Rds'))
+```
+
 
 Define the main plotting function
 ```{r}
@@ -283,7 +403,7 @@ idx <- mutate(fr, idx = 1:nrow(fr)) %>%
   pull(idx) %>% sort()
 
 ch <- res_heatmap(fr, prec_sens_wide, idx = idx,
-                  filename = file.path(FIG_DIR, 'ranking_som_data_filter2.pdf'), 
+                  filename = file.path(FIG_DIR, 'ranking_sim_data_filter2.pdf'), 
                   fig_width = 7, fig_height = 4)
 ```
 

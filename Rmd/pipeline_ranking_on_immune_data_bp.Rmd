@@ -19,6 +19,7 @@ source('R/utilities.R')
 
 library('dplyr')
 library('ComplexHeatmap')
+library('ggplot2')
 
 BP_DIR <- file.path(config$out_root, 'results', 'immune_data_blueprint')
 RES_DIR <- file.path(config$out_root, 'results', 'immune_data')
@@ -50,6 +51,7 @@ print(comps)
 ```
 
 ```{r}
+res_list <- list()
 for (comp in comps) {
   message(comp)
   
@@ -63,148 +65,208 @@ for (comp in comps) {
   
   # run GSEA per DE pipeline
   rds_files <- list.files(path = RES_DIR, pattern = paste0('^', comp, '.*\\.Rds$'), full.names = TRUE)
-  # for testing: f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-edger_qlf_7pr.Rds"
-  f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-edger_qlf_7pr.Rds"
-  f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-sum1-mast.Rds"
-  res <- readRDS(f)
-  de_res <- res$res %>% 
-    mutate(pval = case_when(is.na(pval) ~ 1, TRUE ~ pval),
-           FDR = p.adjust(pval, method = 'fdr'),
-           pred_de = FDR < 0.05,
-           pred_de3 = factor(effect_direction * (FDR < 0.05), levels = c(-1, 0, 1)))
   
-  de_res <- left_join(de_res, bp_de_res, by = c('feature' = 'symbol')) %>%
-    filter(). # filter out NA in grp1, grp2 (non-matching gene names)?
-  table(de_res$pred_de3, de_res$grp1 == 0, useNA = 'always')
-  table(de_res$pred_de3, de_res$grp2 == 0, useNA = 'always')
-  table(de_res$pred_de3, de_res$grp1 == 1, useNA = 'always')
-  table(de_res$pred_de3, de_res$grp2 == 1, useNA = 'always')
+  comp_res <- lapply(rds_files, function(f) {
+    # for testing: f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-edger_qlf_7pr.Rds"
+    #f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-edger_qlf_7pr.Rds"
+    #f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-sum1-mast.Rds"
+    #f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-qlrt_7pr.Rds"
+    #f <- "/home/rstudio/mnt_out/results/immune_data/T_CELLS_vs_MONOCYTES-counts-limma_voom_7pr.Rds"
+    res <- readRDS(f)
+    de_res <- res$res %>% 
+      mutate(pval = case_when(is.na(pval) ~ 1, TRUE ~ pval),
+             FDR = p.adjust(pval, method = 'fdr'),
+             pred_de = FDR < 0.05,
+             pred_de3 = factor(effect_direction * (FDR < 0.05), levels = c(-1, 0, 1)))
+    
+    de_res <- left_join(de_res, bp_de_res, by = c('feature' = 'symbol')) %>%
+      filter(!is.na(grp1), !is.na(grp2)) # filter out NA in grp1, grp2 (non-matching gene names)?
+    #table(de_res$pred_de3, de_res$grp1 == 0, useNA = 'always')
+    #table(de_res$pred_de3, de_res$grp2 == 0, useNA = 'always')
+    #table(de_res$pred_de3, de_res$grp1 == 1, useNA = 'always')
+    #table(de_res$pred_de3, de_res$grp2 == 1, useNA = 'always')
+    
+    # proxy for precision: fraction of DE genes that is in core bulk DE set
+    # proxy for sensitivity: fraction of core bulk DE set that is DE
+    if (comp_ordered != comp) {
+      de_res <- mutate(de_res, bulk_de3 = grp1 - grp2)
+    } else {
+      de_res <- mutate(de_res, bulk_de3 = grp2 - grp1)
+    }
+    
+    # metrics for core DE
+    tmp <- mutate(de_res, bulk_de3 = case_when(bulk_de3 < 1 & bulk_de3 > -1 ~ 0, TRUE ~ bulk_de3)) 
+    
+    bind_cols(
+      tidyr::pivot_wider(res$timing, names_from = step, values_from = c(name, time)),
+      summarise(tmp, perf_metrics(pred_de3, bulk_de3)) 
+      # summarise(de_res, 
+      #           n = n(), n_pred_de = sum(pred_de3 != 0), 
+      #           n_bulk_all = sum(bulk_de3 %in% c(-1, 1)),
+      #           n_bulk_any = sum(bulk_de3 != 0),
+      #           prec = (sum(pred_de3 == -1 & bulk_de3 == -1) + sum(pred_de3 == 1 & bulk_de3 == 1)) / n_pred_de,
+      #           relevance = (sum(pred_de3 == -1 & bulk_de3 < 0) + sum(pred_de3 == 1 & bulk_de3 > 0)) / n_pred_de,
+      #           sens = (sum(pred_de3 == -1 & bulk_de3 == -1) + sum(pred_de3 == 1 & bulk_de3 == 1)) / n_bulk_all,
+      #           recovery = (sum(pred_de3 == -1 & bulk_de3 < 0) + sum(pred_de3 == 1 & bulk_de3 > 0)) / n_bulk_any)
+    ) %>%
+      mutate(comparison = comp)
+  }) %>% bind_rows()
   
-  # proxy for precision: fraction of DE genes that is in core bulk DE set
-  # proxy for sensitivity: fraction of core bulk DE set that is DE
-  if (comp_ordered != comp) {
-    de_res <- mutate(de_res, bulk_de3 = grp1 - grp2)
-  } else {
-    de_res <- mutate(de_res, bulk_de3 = grp2 - grp1)
-  }
-  
-  summarise(de_res, prec = )
-  
-  all_feats <- c(bp_de_res$symbol, de_res$feature)
-  com_feats <- intersect(bp_de_res$symbol, de_res$feature)
-  table(de_res$feature %in% com_feats)
-  table(bp_de_res$symbol %in% com_feats)
-  
+  res_list[[comp]] <- comp_res
 }
+sum_res <- bind_rows(res_list) %>%
+  dplyr::rename(transformation = name_transformation, 
+                de_method = name_de_method) %>%
+  mutate(time = time_transformation + time_de_method,
+         pipeline = paste(transformation, de_method, sep = '-'),
+         F1 = 2 * (Precision * Sensitivity) / (Precision + Sensitivity))
+```
+
+## Show distribution of scores
+
+```{r}
+ggplot(sum_res, aes(Precision)) +
+  geom_histogram(binwidth = 0.02) +
+  facet_wrap(~ comparison)
+
+ggplot(sum_res, aes(Sensitivity)) +
+  geom_histogram(binwidth = 0.02) +
+  facet_wrap(~ comparison)
+
+ggplot(sum_res, aes(GSS)) +
+  geom_histogram(binwidth = 0.01) +
+  facet_wrap(~ comparison)
+
+ggplot(sum_res, aes(F1)) +
+  geom_histogram(binwidth = 0.01) +
+  facet_wrap(~ comparison)
+
+ggplot(sum_res, aes(PSS)) +
+  geom_histogram(binwidth = 0.01) +
+  facet_wrap(~ comparison)
+
+ggplot(sum_res, aes(OR)) +
+  geom_histogram(binwidth = 0.01) +
+  facet_wrap(~ comparison)
+
+ggplot(sum_res, aes(ORSS)) +
+  geom_histogram(binwidth = 0.01) +
+  facet_wrap(~ comparison)
+```
+
+```{r}
+ggplot(sum_res, aes(Sensitivity, Precision, color = comparison)) +
+  geom_point()
+ggplot(sum_res, aes(Sensitivity, Precision, color = cut(GSS, 11))) +
+  geom_point() +
+  facet_wrap(~ comparison) +
+  theme_dark() +
+  scale_color_viridis_d() 
+
+ggplot(sum_res, aes(Sensitivity, Precision, color = cut(F1, 11))) +
+  geom_point() +
+  facet_wrap(~ comparison) +
+  theme_dark() +
+  scale_color_viridis_d() 
+
+ggplot(sum_res, aes(Sensitivity, Precision, color = cut(PSS, 11))) +
+  geom_point() +
+  facet_wrap(~ comparison) +
+  theme_dark() +
+  scale_color_viridis_d() 
+
+ggplot(sum_res, aes(Sensitivity, Precision, color = cut(OR, 11))) +
+  geom_point() +
+  facet_wrap(~ comparison) +
+  theme_dark() +
+  scale_color_viridis_d() 
+
+ggplot(sum_res, aes(Sensitivity, Precision, color = cut(ORSS, 11))) +
+  geom_point() +
+  facet_wrap(~ comparison) +
+  theme_dark() +
+  scale_color_viridis_d() 
+```
+
+Re-scale the metrics to go from 0 to 1 per comparison
+```{r}
+sum_res <- group_by(sum_res, comparison) %>%
+  mutate(Precision_rel = scales::rescale(Precision),
+         Sensitivity_rel = scales::rescale(Sensitivity),
+         GSS_rescaled = scales::rescale(scales::oob_squish_any(GSS)))
+ggplot(sum_res, aes(Sensitivity_rel, Precision_rel, color = comparison)) +
+  geom_point()
+ggplot(sum_res, aes(Sensitivity, Precision, color = GSS_rescaled)) +
+  geom_point() +
+  facet_wrap(~ comparison, scales = 'free') +
+  theme_dark() +
+  scale_color_viridis_c() 
 ```
 
 
+## Summarize the summarized results
 
-
-
-
-
-
-
-
-
-
-## Load summarized results
+GSS ranking
 ```{r}
-res_files <- list.files(path = RES_DIR, pattern = '^gsea_.+\\.Rds$', full.names = TRUE)
-gsea_res <- lapply(res_files, function(x) {
-  comp <- stringr::str_remove_all(string = basename(x), pattern = '^gsea_|\\.Rds$')
-  readRDS(file = x) %>%
-    mutate(comp = comp)
-}) %>% bind_rows()
-```
-
-## Calculate scores
-
-### relevance (specificity)
-
-Get fraction of unspecific sets among all enriched ones; relevance score is one minus unspecific fraction
-```{r}
-sum1 <- group_by(gsea_res, comp, transformation, de_method, pipeline) %>%
-  filter(fdr < 0.05, is_gobp) %>%
-  summarise(n = n(), n_unspec = sum(is_gobp_unspecific), 
-            relevance = 1 - n_unspec / n, .groups = 'drop')
-```
-
-### recovery (immunesigdb ranks aka sensitivity)
-
-Get ranks of expected IMMUNESIGDB sets
-```{r}
-sum2 <- group_by(gsea_res, comp, transformation, de_method, pipeline) %>%
-  filter(!(is_gobp_immune)) %>%
-  mutate(fdr = p.adjust(p = pval, method = 'fdr')) %>%
-  arrange(pval, overlap, .by_group = TRUE) %>%
-  mutate(set_rank = 1:n()) %>%
-  summarise(isig_n = sum(is_sigdb_expected),
-            isig_sig = sum(fdr < 0.05 & is_sigdb_expected, na.rm = TRUE), 
-            isig_top_n = sum(is_sigdb_expected[1:isig_n]),
-            isig_top_2n = sum(is_sigdb_expected[1:(2*isig_n)]),
-            isig_med_rank = median(set_rank[is_sigdb_expected]),
-            isig_avg_rank = mean(set_rank[is_sigdb_expected]), .groups = 'drop')
-```
-
-### Combine
-```{r}
-gsea_sum <- left_join(sum1, sum2)
-#saveRDS(gsea_sum, 
-#        file = file.path(config$out_root, 'immune_gsea_results_summary.Rds'))
-```
-
-Derive a combined score
-```{r}
-fr <- group_by(gsea_sum, transformation, de_method, pipeline) %>%
-  summarise(score = mean(relevance) + mean(isig_top_n/isig_n)) %>%
-  #summarise(score = mean(relevance) + mean(isig_sig/isig_n)) %>%
+fr <- group_by(sum_res, transformation, de_method, pipeline) %>%
+  summarise(score = mean(GSS), time = sum(time)) %>%
+  #summarise(score = mean(relevance) + mean(recovery), time = sum(time)) %>%
   ungroup() %>%
   arrange(-score)
 fr
 ```
 
-Add time
+rel GSS ranking
 ```{r}
-# load and sum per pipeline
-timing_res <- readRDS(file = file.path(RES_DIR, 'timing_results.Rds')) %>%
-  mutate(pipeline = paste(transformation, de_method, sep = '-')) %>%
-  group_by(pipeline) %>%
-  summarise(time = sum(time), time_n = n(), .groups = 'drop')
-
-table(timing_res$time_n)
-
-fr <- left_join(fr, timing_res, by = 'pipeline')
+fr <- group_by(sum_res, transformation, de_method, pipeline) %>%
+  summarise(score = mean(GSS_rescaled), time = sum(time)) %>%
+  #summarise(score = mean(relevance) + mean(recovery), time = sum(time)) %>%
+  ungroup() %>%
+  arrange(-score)
+fr
 ```
 
-We want to show Relevance and Recovery per pipeline per comparison
+
+Use mean rescaled GSS as final score
 ```{r}
-rel_rec <- group_by(gsea_sum, comp, transformation, de_method, pipeline) %>%
-  summarise(Relevance = relevance, Recovery = isig_top_2n/isig_n, .groups = 'drop')
+fr <- group_by(sum_res, transformation, de_method, pipeline) %>%
+  summarise(score = mean(GSS_rescaled), time = sum(time)) %>%
+  ungroup() %>%
+  arrange(-score)
+fr %>% select(transformation, de_method, score, time)
 ```
+
+## Create heatmaps
 
 Get data into wide format
 ```{r}
-rel_rec_wide <- arrange(rel_rec, comp) %>%
+metrics_wide <- arrange(sum_res, comp) %>%
                   tidyr::pivot_wider(
                               id_cols = c(pipeline, transformation, de_method),
-                              names_from = c(comp, comp), 
-                              values_from = c(Relevance, Recovery)) %>%
+                              names_from = c(comparison, comparison), 
+                              values_from = c(Precision, Sensitivity)) %>%
   select(-transformation, -de_method) 
 ```
+
+Save final ranking 
+```{r}
+saveRDS(list(fr = fr, metrics_wide = metrics_wide), 
+        file = file.path(config$out_root, 'results', 'final_ranking_immune.Rds'))
+```
+
 
 Define the main plotting function
 ```{r}
 library('ComplexHeatmap')
-res_heatmap <- function(fr, rel_rec_wide, idx = 1:nrow(fr), do_rescale = TRUE,
-                        filename = NULL, fig_width = 7, fig_height = 32) {
+res_heatmap <- function(fr, metrics_wide, idx = 1:nrow(fr), do_rescale = TRUE,
+                        filename = NULL, fig_width = 7, fig_height = 32, 
+                        show_values = TRUE) {
   fr <- fr[idx, ]
   
-  mat <- as.matrix(left_join(fr, rel_rec_wide, by = 'pipeline') %>%
-                   select(starts_with(c("Rel", "Rec"))))
+  mat <- as.matrix(left_join(fr, metrics_wide, by = 'pipeline') %>%
+                   select(starts_with(c("Prec", "Sens"))))
   rownames(mat) <- as.character(fr$pipeline)
-  colnames(mat) <- stringr::str_remove(colnames(mat), '^Relevance_|^Recovery_')
+  colnames(mat) <- stringr::str_remove(colnames(mat), '^Precision_|^Sensitivity_')
   colnames(mat) <- stringr::str_replace_all(colnames(mat), pattern = '_', replacement = ' ')
   colnames(mat) <- gsub("(^|[[:space:]])([[:alpha:]])", "\\1\\U\\2", colnames(mat), perl=TRUE)
   colnames(mat) <- stringr::str_replace_all(colnames(mat), pattern = 'Vs', replacement = 'vs')
@@ -227,14 +289,18 @@ res_heatmap <- function(fr, rel_rec_wide, idx = 1:nrow(fr), do_rescale = TRUE,
                       gp = gpar(fontsize = 8, 
                                 col = c('white', 'black')[(mat_rescaled[i, j] > 0.4) + 1]))
   }
+  if (!show_values) {
+    cell_fun = NULL
+  }
   
   ta = HeatmapAnnotation(foo = anno_block(
     gp = gpar(fill = 'gray'),
-    labels = c("Relevance", "Recovery"), 
+    labels = c("Precision", "Sensitivity"), 
     labels_gp = gpar(col = "black", fontsize = 10)))
   
   anno_right <- rowAnnotation(
-    #GSS = anno_barplot(fr$GSS, bar_width = 1),
+    GSS = anno_barplot(scales::oob_squish_any(fr$score), bar_width = 1),
+    #F1 = anno_barplot(fr$F1, bar_width = 1),
     #FDR_low = anno_barplot(fr$FDR_low, bar_width = 1),
     #FDR_high = anno_barplot(fr$FDR_high, bar_width = 1),
     Time = anno_barplot(fr$time, bar_width = 1),
@@ -279,19 +345,24 @@ res_heatmap <- function(fr, rel_rec_wide, idx = 1:nrow(fr), do_rescale = TRUE,
 
 Big heatmap
 ```{r}
-ch <- res_heatmap(fr, rel_rec_wide, 
-                  filename = file.path(FIG_DIR, 'ranking_immune_data_big.pdf'), 
-                  fig_width = 6, fig_height = 42)
+ch <- res_heatmap(fr, metrics_wide, 
+                  filename = file.path(FIG_DIR, 'ranking_immune_data_bp_big.pdf'), 
+                  fig_width = 7, fig_height = 42)
+```
+```{r}
+ch <- res_heatmap(fr, metrics_wide, 
+                  filename = file.path(FIG_DIR, 'ranking_immune_data_bp_big_squished.pdf'), 
+                  fig_width = 7, fig_height = 6, show_values = FALSE)
 ```
 
 PB vs non-PB
 ```{r}
 pb = grepl(pattern = '\\dpr+', fr$de_method)
-ch <- res_heatmap(fr, rel_rec_wide, idx = which(pb),
-                  filename = file.path(FIG_DIR, 'ranking_immune_data_big_pb.pdf'), 
+ch <- res_heatmap(fr, metrics_wide, idx = which(pb),
+                  filename = file.path(FIG_DIR, 'ranking_immune_data_bp_big_pb.pdf'), 
                   fig_width = 6, fig_height = 16)
-ch <- res_heatmap(fr, rel_rec_wide, idx = which(!pb),
-                  filename = file.path(FIG_DIR, 'ranking_immune_data_big_sc.pdf'), 
+ch <- res_heatmap(fr, metrics_wide, idx = which(!pb),
+                  filename = file.path(FIG_DIR, 'ranking_immune_data_bp_big_sc.pdf'), 
                   fig_width = 6, fig_height = 22)
 ```
 
@@ -306,8 +377,8 @@ idx <- mutate(fr, idx = 1:nrow(fr)) %>%
   slice_min(order_by = idx) %>%
   pull(idx) %>% sort()
 
-ch <- res_heatmap(fr, rel_rec_wide, idx = idx,
-                  filename = file.path(FIG_DIR, 'ranking_immune_data_filter1.pdf'), 
+ch <- res_heatmap(fr, metrics_wide, idx = idx,
+                  filename = file.path(FIG_DIR, 'ranking_immune_data_bp_filter1.pdf'), 
                   fig_width = 7, fig_height = 6)
 
 fr <- mutate(fr, de_method_grp2 = stringr::str_remove_all(string = de_method_grp1, pattern = '_(lrt|wald|exact|qlf|trend|voom)$'))
@@ -319,10 +390,11 @@ idx <- mutate(fr, idx = 1:nrow(fr)) %>%
   slice_min(order_by = idx) %>%
   pull(idx) %>% sort()
 
-ch <- res_heatmap(fr, rel_rec_wide, idx = idx,
-                  filename = file.path(FIG_DIR, 'ranking_immune_data_filter2.pdf'), 
+ch <- res_heatmap(fr, metrics_wide, idx = idx,
+                  filename = file.path(FIG_DIR, 'ranking_immune_data_bp_filter2.pdf'), 
                   fig_width = 7, fig_height = 4)
 ```
+
 
 # Appendix
 

@@ -1,0 +1,180 @@
+---
+title: 'Combined pipeline ranking'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+source('R/utilities.R')
+
+library('ggplot2')
+library('ggrepel')
+library('dplyr')
+library('Matrix')
+library('patchwork')
+library('scales')
+
+RES_DIR <- file.path(config$out_root, 'results')
+FIG_DIR <- file.path(config$out_root, 'figures')
+```
+
+# Main
+
+## Load the two tables and join
+
+```{r}
+res_immune <- readRDS(file = file.path(RES_DIR, 'final_ranking_immune.Rds'))$fr
+res_sim <- readRDS(file = file.path(RES_DIR, 'final_ranking_simulated.Rds'))$fr
+
+res <- left_join(res_immune, res_sim, by = c('transformation', 'de_method', 'pipeline')) %>%
+  mutate(`Uses pseudo-bulk` = grepl(pattern = '\\dpr', de_method))
+```
+
+## Plots
+
+Top pipelines
+```{r}
+hl_rank <- 50
+res_top <- mutate(res, rank.x = rank(-score.x, ties.method = 'min'),
+                   rank.y = rank(-score.y, ties.method = 'min')) %>%
+  filter(rank.x <= hl_rank, rank.y <= hl_rank)
+```
+
+
+```{r}
+p1 <- ggplot(res, aes(score.x, score.y, color = `Uses pseudo-bulk`)) +
+  geom_rect(aes(xmin = min(res_top$score.x), xmax = max(res_top$score.x), 
+                ymin = min(res_top$score.y), ymax = max(res_top$score.y)),
+                color = 'gray88', fill = 'gray88') +
+  geom_point() +
+  xlab('Simulation score') +
+  ylab('Immune data score') +
+  scale_color_discrete(name = "Pipeline uses", 
+                       labels = c('single-cell data', 'pseudo-bulk data')) +
+  #guides(color = guide_legend(title="Pipeline uses\npseudo-bulk")) +
+  theme_classic(base_size = 10) +
+  theme(legend.position = c(0.01,1), legend.justification = c(0,1),
+        legend.background = element_blank(),
+        legend.box.background = element_rect(colour = "black"))
+show(p1)
+```
+
+
+```{r}
+library(gridExtra)
+library(grid)
+tmp <- mutate(res, rank.x = rank(-score.x, ties.method = 'min'),
+       rank.y = rank(-score.y, ties.method = 'min')) %>%
+  filter(rank.x <= hl_rank, rank.y <= hl_rank) %>%
+  arrange(rank.x + rank.y) %>%
+  mutate(score.x = round(score.x, 2), score.y = round(score.y, 2)) %>%
+  select(transformation, de_method, score.x, score.y) %>%
+  dplyr::rename('Transformation' = 'transformation',
+                'Method' = 'de_method',
+                'Sim. score' = 'score.x',
+                'Imm. score' = 'score.y') %>%
+  as.data.frame() %>%
+  tableGrob(theme = ttheme_default(base_size = 9, 
+                                   padding = unit(c(0.3, 0.3), "lines")),
+            rows = NULL)
+```
+
+```{r}
+#tmp$grobs[[124]]$gp$fill <- 'deeppink'
+# one could potentially color the rows
+# also check tmp$layout to find the grob index of the rows
+plot(tmp)
+```
+
+### Final plot
+
+```{r, fig.width=7.5, out.width='100%', fig.height=5.5}
+p_fin <- p1 + tmp + plot_layout(widths = c(1,1.4))
+show(p_fin)
+```
+
+```{r}
+p_fin <- p1 + tmp + plot_layout(widths = c(1,1.2))
+cairo_pdf(filename = file.path(FIG_DIR, 'combined_ranking.pdf'), 
+          width = 7, height = 3.8)
+show(p_fin)
+dev.off()
+```
+
+### For single-cell approaches
+
+```{r}
+hl_rank <- 50
+res_top <- filter(res, !`Uses pseudo-bulk`) %>%
+  mutate(rank.x = rank(-score.x, ties.method = 'min'),
+                   rank.y = rank(-score.y, ties.method = 'min')) %>%
+  filter(rank.x <= hl_rank, rank.y <= hl_rank)
+
+p1 <- filter(res, !`Uses pseudo-bulk`) %>%
+  ggplot(aes(score.x, score.y, color = `Uses pseudo-bulk`)) +
+  geom_rect(aes(xmin = min(res_top$score.x), xmax = max(res_top$score.x), 
+                ymin = min(res_top$score.y), ymax = max(res_top$score.y)),
+                color = 'gray88', fill = 'gray88') +
+  geom_point() +
+  xlab('Simulation score') +
+  ylab('Immune data score') +
+  scale_color_discrete(name = "Pipeline uses", 
+                       labels = c('single-cell data', 'pseudo-bulk data')) +
+  #guides(color = guide_legend(title="Pipeline uses\npseudo-bulk")) +
+  theme_classic(base_size = 10) +
+  theme(legend.position = c(0.01,1), legend.justification = c(0,1),
+        legend.background = element_blank(),
+        legend.box.background = element_rect(colour = "black"))
+
+tmp <- filter(res, !`Uses pseudo-bulk`) %>%
+  mutate(rank.x = rank(-score.x, ties.method = 'min'),
+       rank.y = rank(-score.y, ties.method = 'min')) %>%
+  filter(rank.x <= hl_rank, rank.y <= hl_rank) %>%
+  arrange(rank.x + rank.y) %>%
+  mutate(score.x = round(score.x, 2), score.y = round(score.y, 2)) %>%
+  select(transformation, de_method, score.x, score.y) %>%
+  dplyr::rename('Transformation' = 'transformation',
+                'Method' = 'de_method',
+                'Sim. score' = 'score.x',
+                'Imm. score' = 'score.y') %>%
+  as.data.frame() %>%
+  tableGrob(theme = ttheme_default(base_size = 9, 
+                                   padding = unit(c(0.3, 0.3), "lines")),
+            rows = NULL)
+
+p_fin <- p1 + tmp + plot_layout(widths = c(1,1.3))
+cairo_pdf(filename = file.path(FIG_DIR, 'combined_ranking_sc.pdf'), 
+          width = 7, height = 4.2)
+show(p_fin)
+dev.off()
+```
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```
+
+Future plan
+```{r}
+future::plan()
+```
+
+More session info
+```{r}
+devtools::session_info()
+```

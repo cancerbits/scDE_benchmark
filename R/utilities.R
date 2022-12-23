@@ -88,8 +88,8 @@ three_way_confusion <- function(prediction, reference) {
   tab <- table(reference, prediction)
   OD <- tab[1,3] + tab[3,1]  # opposite effect direction
   TP <- tab[1,1] + tab[3,3]
-  FN <- tab[1,2] + tab[3,2] + OD
-  FP <- tab[2,1] + tab[2,3] + OD
+  FN <- tab[1,2] + tab[3,2] + OD/2
+  FP <- tab[2,1] + tab[2,3] + OD/2
   TN <- length(reference) - TP - FN - FP
   return(data.frame(TP=TP, FN=FN, FP=FP, TN=TN, OD=OD))
 }
@@ -97,8 +97,21 @@ three_way_confusion <- function(prediction, reference) {
 perf_metrics <- function(prediction, reference) {
   data.frame(n = length(reference)) %>%
     bind_cols(three_way_confusion(prediction, reference)) %>%
-    mutate(Precision = TP / (TP + FP), Sensitivity = TP / (TP + FN),
-           GSS = gilbert_skill_score(TP, FN, FP, TN))
+    mutate(Precision = TP / (TP + FP), 
+           Sensitivity = TP / (TP + FN),
+           Specificity = TN / (TN + FP),
+           Bias = (TP + FP) / (TP + FN),
+           FDR = case_when(TP + FP == 0 ~ 0, TRUE ~ 1 - Precision),
+           BA = (Sensitivity + Specificity) / 2,
+           F1 = (2 * TP) / (2 * TP + FP + FN),
+           MCC = case_when((TP + FP) == 0 | (TP + FN) == 0 | (TN + FP) == 0 | (TN + FN) == 0 ~ 0,
+                           TRUE ~ ((TP * TN) - (FP * FN)) / sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN))),
+           FM = case_when((TP + FP) == 0 ~ 0, TRUE ~ sqrt(Precision * Sensitivity)),
+           GSS = gilbert_skill_score(TP, FN, FP, TN),
+           CSI = TP / (TP + FN + FP),
+           PSS = (TP / (TP + FN)) - (FP / (FP + TN)),
+           OR = (TP * TN) / (FP * FN),
+           ORSS = (OR - 1) / (OR + 1))
 }
 
 # subset a list of genesets to those that are offspring of a specific go_id

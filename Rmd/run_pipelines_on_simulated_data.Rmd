@@ -109,7 +109,7 @@ for (f in data_files) {
       saveRDS(object = res, file = out_file)
       return('done')
     }
-  }, future.seed=TRUE)
+  }, future.seed=NULL)
   table(return_values)
 }
 ```

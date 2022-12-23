@@ -131,7 +131,7 @@ return_values <- future_sapply(X = 1:nrow(jobs), FUN = function(i) {
     saveRDS(object = res, file = out_file)
     return('done')
   }
-}, future.seed=TRUE)
+}, future.seed=NULL)
 table(return_values)
 ```
 
