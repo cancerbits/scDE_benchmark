@@ -25,10 +25,10 @@ dir.create(report_dir, recursive = TRUE, showWarnings = FALSE)
 #                   envir = new.env())
 
 # summarize results on the simulated data
-rmarkdown::render(input = 'Rmd/summarize_results_on_simulated_data.Rmd',
-                  output_dir = report_dir,
-                  knit_root_dir = config$project_root,
-                  envir = new.env())
+# rmarkdown::render(input = 'Rmd/summarize_results_on_simulated_data.Rmd',
+#                   output_dir = report_dir,
+#                   knit_root_dir = config$project_root,
+#                   envir = new.env())
 
 # rank pipelines on simulated data
 # rmarkdown::render(input = 'Rmd/pipeline_ranking_on_simulated_data.Rmd',
@@ -43,10 +43,10 @@ rmarkdown::render(input = 'Rmd/summarize_results_on_simulated_data.Rmd',
 #                   envir = new.env())
 
 # rank pipelines on immune data
-# rmarkdown::render(input = 'Rmd/pipeline_ranking_on_immune_data_bp.Rmd',
-#                   output_dir = report_dir,
-#                   knit_root_dir = config$project_root,
-#                   envir = new.env())
+rmarkdown::render(input = 'Rmd/pipeline_ranking_on_immune_data_bp.Rmd',
+                  output_dir = report_dir,
+                  knit_root_dir = config$project_root,
+                  envir = new.env())
 
 # prep the GSEA evaluation
 # rmarkdown::render(input = 'Rmd/prep_GSEA.Rmd',
@@ -59,3 +59,9 @@ rmarkdown::render(input = 'Rmd/summarize_results_on_simulated_data.Rmd',
 #                   output_dir = report_dir,
 #                   knit_root_dir = config$project_root,
 #                   envir = new.env())
+
+# combined ranking of pipelines
+rmarkdown::render(input = 'Rmd/pipeline_ranking_combined.Rmd',
+                  output_dir = report_dir,
+                  knit_root_dir = config$project_root,
+                  envir = new.env())

@@ -22,6 +22,7 @@ library('ComplexHeatmap')
 library('ggplot2')
 
 BP_DIR <- file.path(config$out_root, 'results', 'immune_data_blueprint')
+DATA_DIR <- file.path(config$out_root, 'immune_data')
 RES_DIR <- file.path(config$out_root, 'results', 'immune_data')
 FIG_DIR <- file.path(config$out_root, 'figures')
 FIG_SUPP_DIR <- file.path(config$out_root, 'figures', 'supp')
@@ -29,6 +30,33 @@ dir.create(path = FIG_SUPP_DIR, showWarnings = FALSE, recursive = TRUE)
 ```
 
 # Main
+
+## Load the single-cell data
+
+We want to collect some gene and comparison level meta data.
+
+```{r}
+comp_data <- readRDS(file = file.path(DATA_DIR, 'immune_comp_data.Rds'))
+gene_mean_breaks <- c(-Inf, 0.1, 1, Inf)
+
+comp_data_md <- lapply(names(comp_data), function(comp_raw) {
+  comp <- stringr::str_replace_all(string = comp_raw, pattern = ' ', replacement = '_')
+  group_means <- sctransform:::row_mean_grouped_dgcmatrix(matrix = comp_data[[comp_raw]]$counts, 
+                                                          group = comp_data[[comp_raw]]$cell_metadata$group_id, shuffle = FALSE)
+  data.frame(feature = rownames(group_means),
+             mean1 = group_means[, 1],
+             mean2 = group_means[, 2], 
+             row.names = NULL) %>%
+    mutate(
+      obs_mean = expm1((log1p(mean1) + log1p(mean2)) / 2),
+      expr_grp = cut(obs_mean, breaks = gene_mean_breaks, labels = c('low', 'medium', 'high')),
+      comparison = comp
+    ) %>%
+    select(feature, expr_grp, comparison)
+}) %>% dplyr::bind_rows()
+table(comp_data_md$comparison, comp_data_md$expr_grp)
+```
+
 
 ## Load the bulk data results
 
@@ -81,10 +109,6 @@ for (comp in comps) {
     
     de_res <- left_join(de_res, bp_de_res, by = c('feature' = 'symbol')) %>%
       filter(!is.na(grp1), !is.na(grp2)) # filter out NA in grp1, grp2 (non-matching gene names)?
-    #table(de_res$pred_de3, de_res$grp1 == 0, useNA = 'always')
-    #table(de_res$pred_de3, de_res$grp2 == 0, useNA = 'always')
-    #table(de_res$pred_de3, de_res$grp1 == 1, useNA = 'always')
-    #table(de_res$pred_de3, de_res$grp2 == 1, useNA = 'always')
     
     # proxy for precision: fraction of DE genes that is in core bulk DE set
     # proxy for sensitivity: fraction of core bulk DE set that is DE
@@ -94,22 +118,21 @@ for (comp in comps) {
       de_res <- mutate(de_res, bulk_de3 = grp2 - grp1)
     }
     
-    # metrics for core DE
-    tmp <- mutate(de_res, bulk_de3 = case_when(bulk_de3 < 1 & bulk_de3 > -1 ~ 0, TRUE ~ bulk_de3)) 
+    # core DE means full agreement between all bulk methods
+    de_res <- mutate(de_res, bulk_de3 = case_when(bulk_de3 < 1 & bulk_de3 > -1 ~ 0, TRUE ~ bulk_de3))
+    # merge with feature level meta data from input data
+    de_res <- left_join(de_res, filter(comp_data_md, comparison == comp), by = c('feature'))
+    
+    performance <- summarise(de_res, perf_metrics(pred_de3, bulk_de3)) 
+    performance_strat <- group_by(de_res, expr_grp) %>%
+      summarise(perf_metrics(pred_de3, bulk_de3), .groups = 'drop')
+    performance_sum <- dplyr::bind_rows(performance, performance_strat)
     
     bind_cols(
       tidyr::pivot_wider(res$timing, names_from = step, values_from = c(name, time)),
-      summarise(tmp, perf_metrics(pred_de3, bulk_de3)) 
-      # summarise(de_res, 
-      #           n = n(), n_pred_de = sum(pred_de3 != 0), 
-      #           n_bulk_all = sum(bulk_de3 %in% c(-1, 1)),
-      #           n_bulk_any = sum(bulk_de3 != 0),
-      #           prec = (sum(pred_de3 == -1 & bulk_de3 == -1) + sum(pred_de3 == 1 & bulk_de3 == 1)) / n_pred_de,
-      #           relevance = (sum(pred_de3 == -1 & bulk_de3 < 0) + sum(pred_de3 == 1 & bulk_de3 > 0)) / n_pred_de,
-      #           sens = (sum(pred_de3 == -1 & bulk_de3 == -1) + sum(pred_de3 == 1 & bulk_de3 == 1)) / n_bulk_all,
-      #           recovery = (sum(pred_de3 == -1 & bulk_de3 < 0) + sum(pred_de3 == 1 & bulk_de3 > 0)) / n_bulk_any)
+      performance_sum 
     ) %>%
-      mutate(comparison = comp)
+      mutate(comparison = comp) 
   }) %>% bind_rows()
   
   res_list[[comp]] <- comp_res
@@ -118,70 +141,51 @@ sum_res <- bind_rows(res_list) %>%
   dplyr::rename(transformation = name_transformation, 
                 de_method = name_de_method) %>%
   mutate(time = time_transformation + time_de_method,
-         pipeline = paste(transformation, de_method, sep = '-'),
-         F1 = 2 * (Precision * Sensitivity) / (Precision + Sensitivity))
+         pipeline = paste(transformation, de_method, sep = '-'))
 ```
 
 ## Show distribution of scores
 
 ```{r}
-ggplot(sum_res, aes(Precision)) +
+res_all_genes <- filter(sum_res, is.na(expr_grp))
+ggplot(res_all_genes, aes(Precision)) +
   geom_histogram(binwidth = 0.02) +
   facet_wrap(~ comparison)
 
-ggplot(sum_res, aes(Sensitivity)) +
+ggplot(res_all_genes, aes(Sensitivity)) +
   geom_histogram(binwidth = 0.02) +
   facet_wrap(~ comparison)
 
-ggplot(sum_res, aes(GSS)) +
+ggplot(res_all_genes, aes(GSS)) +
   geom_histogram(binwidth = 0.01) +
   facet_wrap(~ comparison)
 
-ggplot(sum_res, aes(F1)) +
+ggplot(res_all_genes, aes(F1)) +
   geom_histogram(binwidth = 0.01) +
   facet_wrap(~ comparison)
 
-ggplot(sum_res, aes(PSS)) +
-  geom_histogram(binwidth = 0.01) +
-  facet_wrap(~ comparison)
-
-ggplot(sum_res, aes(OR)) +
-  geom_histogram(binwidth = 0.01) +
-  facet_wrap(~ comparison)
-
-ggplot(sum_res, aes(ORSS)) +
+ggplot(res_all_genes, aes(MCC)) +
   geom_histogram(binwidth = 0.01) +
   facet_wrap(~ comparison)
 ```
 
 ```{r}
-ggplot(sum_res, aes(Sensitivity, Precision, color = comparison)) +
+ggplot(res_all_genes, aes(Sensitivity, Precision, color = comparison)) +
   geom_point()
-ggplot(sum_res, aes(Sensitivity, Precision, color = cut(GSS, 11))) +
+
+ggplot(res_all_genes, aes(Sensitivity, Precision, color = cut(GSS, 11))) +
   geom_point() +
   facet_wrap(~ comparison) +
   theme_dark() +
   scale_color_viridis_d() 
 
-ggplot(sum_res, aes(Sensitivity, Precision, color = cut(F1, 11))) +
+ggplot(res_all_genes, aes(Sensitivity, Precision, color = cut(F1, 11))) +
   geom_point() +
   facet_wrap(~ comparison) +
   theme_dark() +
   scale_color_viridis_d() 
 
-ggplot(sum_res, aes(Sensitivity, Precision, color = cut(PSS, 11))) +
-  geom_point() +
-  facet_wrap(~ comparison) +
-  theme_dark() +
-  scale_color_viridis_d() 
-
-ggplot(sum_res, aes(Sensitivity, Precision, color = cut(OR, 11))) +
-  geom_point() +
-  facet_wrap(~ comparison) +
-  theme_dark() +
-  scale_color_viridis_d() 
-
-ggplot(sum_res, aes(Sensitivity, Precision, color = cut(ORSS, 11))) +
+ggplot(res_all_genes, aes(Sensitivity, Precision, color = cut(MCC, 11))) +
   geom_point() +
   facet_wrap(~ comparison) +
   theme_dark() +
@@ -190,17 +194,52 @@ ggplot(sum_res, aes(Sensitivity, Precision, color = cut(ORSS, 11))) +
 
 Re-scale the metrics to go from 0 to 1 per comparison
 ```{r}
-sum_res <- group_by(sum_res, comparison) %>%
+res_all_genes <- group_by(res_all_genes, comparison) %>%
   mutate(Precision_rel = scales::rescale(Precision),
          Sensitivity_rel = scales::rescale(Sensitivity),
-         GSS_rescaled = scales::rescale(scales::oob_squish_any(GSS)))
-ggplot(sum_res, aes(Sensitivity_rel, Precision_rel, color = comparison)) +
+         GSS_rescaled = scales::rescale(scales::oob_squish_any(GSS)),
+         MCC_rescaled = scales::rescale(scales::oob_squish_any(MCC)))
+ggplot(res_all_genes, aes(Sensitivity_rel, Precision_rel, color = comparison)) +
   geom_point()
-ggplot(sum_res, aes(Sensitivity, Precision, color = GSS_rescaled)) +
+ggplot(res_all_genes, aes(Sensitivity, Precision, color = GSS_rescaled)) +
   geom_point() +
   facet_wrap(~ comparison, scales = 'free') +
   theme_dark() +
   scale_color_viridis_c() 
+ggplot(res_all_genes, aes(Sensitivity, Precision, color = MCC_rescaled)) +
+  geom_point() +
+  facet_wrap(~ comparison, scales = 'free') +
+  theme_dark() +
+  scale_color_viridis_c() 
+```
+Per expression group
+
+```{r}
+res_grouped_genes <- filter(sum_res, !is.na(expr_grp))
+
+ggplot(res_grouped_genes, aes(Precision)) +
+  geom_histogram(binwidth = 0.02) +
+  facet_grid(expr_grp ~ comparison)
+
+ggplot(res_grouped_genes, aes(Sensitivity)) +
+  geom_histogram(binwidth = 0.02) +
+  facet_grid(expr_grp ~ comparison)
+
+ggplot(res_grouped_genes, aes(GSS)) +
+  geom_histogram(binwidth = 0.01) +
+  facet_grid(expr_grp ~ comparison)
+
+ggplot(res_grouped_genes, aes(F1)) +
+  geom_histogram(binwidth = 0.01) +
+  facet_grid(expr_grp ~ comparison)
+
+ggplot(res_grouped_genes, aes(MCC)) +
+  geom_histogram(binwidth = 0.01) +
+  facet_grid(expr_grp ~ comparison)
+
+ggplot(res_grouped_genes, aes(FDR)) +
+  geom_histogram(binwidth = 0.01) +
+  facet_grid(expr_grp ~ comparison)
 ```
 
 
@@ -208,9 +247,8 @@ ggplot(sum_res, aes(Sensitivity, Precision, color = GSS_rescaled)) +
 
 GSS ranking
 ```{r}
-fr <- group_by(sum_res, transformation, de_method, pipeline) %>%
+fr <- group_by(res_all_genes, transformation, de_method, pipeline) %>%
   summarise(score = mean(GSS), time = sum(time)) %>%
-  #summarise(score = mean(relevance) + mean(recovery), time = sum(time)) %>%
   ungroup() %>%
   arrange(-score)
 fr
@@ -218,29 +256,50 @@ fr
 
 rel GSS ranking
 ```{r}
-fr <- group_by(sum_res, transformation, de_method, pipeline) %>%
+fr <- group_by(res_all_genes, transformation, de_method, pipeline) %>%
   summarise(score = mean(GSS_rescaled), time = sum(time)) %>%
-  #summarise(score = mean(relevance) + mean(recovery), time = sum(time)) %>%
   ungroup() %>%
   arrange(-score)
 fr
 ```
 
+## Rank based on GSS and FDR
 
-Use mean rescaled GSS as final score
 ```{r}
-fr <- group_by(sum_res, transformation, de_method, pipeline) %>%
-  summarise(score = mean(GSS_rescaled), time = sum(time)) %>%
-  ungroup() %>%
-  arrange(-score)
-fr %>% select(transformation, de_method, score, time)
+fr <- res_all_genes %>%
+  group_by(transformation, de_method, pipeline) %>%
+  summarise(time = sum(time), GSS = mean(GSS_rescaled), .groups = 'drop') 
+
+fdr_low <- sum_res %>%
+  filter(!is.na(expr_grp), expr_grp == 'low') %>%
+  group_by(comparison) %>%
+  mutate(FDR_rel = scales::rescale(FDR)) %>%
+  group_by(transformation, de_method, pipeline) %>%
+  summarise(FDR = mean(FDR_rel), .groups = 'drop') %>%
+  dplyr::rename(FDR_low = FDR)
+
+fdr_high <- sum_res %>%
+  filter(!is.na(expr_grp), expr_grp == 'high') %>%
+  group_by(comparison) %>%
+  mutate(FDR_rel = scales::rescale(FDR)) %>%
+  group_by(transformation, de_method, pipeline) %>%
+  summarise(FDR = mean(FDR_rel), .groups = 'drop') %>%
+  dplyr::rename(FDR_high = FDR)
+
+fr <- left_join(fr, fdr_low)
+fr <- left_join(fr, fdr_high)
+
+fr <- mutate(fr, score = GSS + (1 - FDR_low) + (1 - FDR_high)) %>%
+  arrange(-score) %>%
+  mutate(pos = rank(-score, ties.method = 'min'))
+fr
 ```
 
 ## Create heatmaps
 
 Get data into wide format
 ```{r}
-metrics_wide <- arrange(sum_res, comp) %>%
+metrics_wide <- arrange(res_all_genes, comp) %>%
                   tidyr::pivot_wider(
                               id_cols = c(pipeline, transformation, de_method),
                               names_from = c(comparison, comparison), 
@@ -299,13 +358,13 @@ res_heatmap <- function(fr, metrics_wide, idx = 1:nrow(fr), do_rescale = TRUE,
     labels_gp = gpar(col = "black", fontsize = 10)))
   
   anno_right <- rowAnnotation(
-    GSS = anno_barplot(scales::oob_squish_any(fr$score), bar_width = 1),
-    #F1 = anno_barplot(fr$F1, bar_width = 1),
-    #FDR_low = anno_barplot(fr$FDR_low, bar_width = 1),
-    #FDR_high = anno_barplot(fr$FDR_high, bar_width = 1),
+    GSS = anno_barplot(fr$GSS, bar_width = 1),
+    FDR_low = anno_barplot(fr$FDR_low, bar_width = 1),
+    FDR_high = anno_barplot(fr$FDR_high, bar_width = 1),
     Time = anno_barplot(fr$time, bar_width = 1),
-    annotation_name_rot = 0,
-    annotation_name_side = 'top')
+    annotation_name_rot = 45,
+    annotation_name_side = 'top',
+    gap = unit(6, "points"))
   
   anno_left <- rowAnnotation(
     Transformation = anno_text(fr$transformation, 
