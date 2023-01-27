@@ -36,7 +36,7 @@ FIG_DIR <- file.path(config$out_root, 'figures')
 res_immune <- readRDS(file = file.path(RES_DIR, 'final_ranking_immune.Rds'))$fr
 res_sim <- readRDS(file = file.path(RES_DIR, 'final_ranking_simulated.Rds'))$fr
 
-res <- left_join(res_immune, res_sim, by = c('transformation', 'de_method', 'pipeline')) %>%
+res <- left_join(res_sim, res_immune, by = c('transformation', 'de_method', 'pipeline')) %>%
   mutate(`Uses pseudo-bulk` = grepl(pattern = '\\dpr', de_method))
 ```
 
@@ -52,18 +52,18 @@ res_top <- mutate(res, rank.x = rank(-score.x, ties.method = 'min'),
 
 
 ```{r}
-p1 <- ggplot(res, aes(score.x, score.y, color = `Uses pseudo-bulk`)) +
-  geom_rect(aes(xmin = min(res_top$score.x), xmax = max(res_top$score.x), 
-                ymin = min(res_top$score.y), ymax = max(res_top$score.y)),
+p1 <- ggplot(res, aes(score.y, score.x, color = `Uses pseudo-bulk`)) +
+  geom_rect(aes(xmin = min(res_top$score.y), xmax = max(res_top$score.y), 
+                ymin = min(res_top$score.x), ymax = max(res_top$score.x)),
                 color = 'gray88', fill = 'gray88') +
   geom_point() +
-  xlab('Simulation score') +
-  ylab('Immune data score') +
+  ylab('Simulation score') +
+  xlab('Immune data score') +
   scale_color_discrete(name = "Pipeline uses", 
                        labels = c('single-cell data', 'pseudo-bulk data')) +
   #guides(color = guide_legend(title="Pipeline uses\npseudo-bulk")) +
   theme_classic(base_size = 10) +
-  theme(legend.position = c(0.01,1), legend.justification = c(0,1),
+  theme(legend.position = c(0.95,0.05), legend.justification = c(1,0),
         legend.background = element_blank(),
         legend.box.background = element_rect(colour = "black"))
 show(p1)
@@ -74,13 +74,14 @@ show(p1)
 library(gridExtra)
 library(grid)
 tmp <- mutate(res, rank.x = rank(-score.x, ties.method = 'min'),
-       rank.y = rank(-score.y, ties.method = 'min')) %>%
+       rank.y = rank(-score.y, ties.method = 'min'),
+       worst_rank = pmax(rank.x, rank.y)) %>%
   filter(rank.x <= hl_rank, rank.y <= hl_rank) %>%
-  arrange(rank.x + rank.y) %>%
+  arrange(worst_rank) %>%
   mutate(score.x = round(score.x, 2), score.y = round(score.y, 2)) %>%
   select(transformation, de_method, score.x, score.y) %>%
   dplyr::rename('Transformation' = 'transformation',
-                'Method' = 'de_method',
+                'DE Method' = 'de_method',
                 'Sim. score' = 'score.x',
                 'Imm. score' = 'score.y') %>%
   as.data.frame() %>%
@@ -106,7 +107,7 @@ show(p_fin)
 ```{r}
 p_fin <- p1 + tmp + plot_layout(widths = c(1,1.2))
 cairo_pdf(filename = file.path(FIG_DIR, 'combined_ranking.pdf'), 
-          width = 7, height = 3.8)
+          width = 7, height = 4)
 show(p_fin)
 dev.off()
 ```
@@ -121,13 +122,13 @@ res_top <- filter(res, !`Uses pseudo-bulk`) %>%
   filter(rank.x <= hl_rank, rank.y <= hl_rank)
 
 p1 <- filter(res, !`Uses pseudo-bulk`) %>%
-  ggplot(aes(score.x, score.y, color = `Uses pseudo-bulk`)) +
-  geom_rect(aes(xmin = min(res_top$score.x), xmax = max(res_top$score.x), 
-                ymin = min(res_top$score.y), ymax = max(res_top$score.y)),
+  ggplot(aes(score.y, score.x, color = `Uses pseudo-bulk`)) +
+  geom_rect(aes(xmin = min(res_top$score.y), xmax = max(res_top$score.y), 
+                ymin = min(res_top$score.x), ymax = max(res_top$score.x)),
                 color = 'gray88', fill = 'gray88') +
   geom_point() +
-  xlab('Simulation score') +
-  ylab('Immune data score') +
+  ylab('Simulation score') +
+  xlab('Immune data score') +
   scale_color_discrete(name = "Pipeline uses", 
                        labels = c('single-cell data', 'pseudo-bulk data')) +
   #guides(color = guide_legend(title="Pipeline uses\npseudo-bulk")) +

@@ -18,38 +18,56 @@ source("R/setup.R")
 source('R/utilities.R')
 
 library('dplyr')
-library('future.apply')
-library('canceRbits')
 
+BP_DIR <- file.path(config$out_root, 'results', 'immune_data_blueprint')
 DATA_DIR <- file.path(config$out_root, 'immune_data')
 RES_DIR <- file.path(config$out_root, 'results', 'immune_data')
-GS_DIR <- file.path(config$out_root, 'geneset_data')
+
 OUT_DIR <- file.path(config$out_root, 'results', 'immune_data_summarized')
 dir.create(path = OUT_DIR, showWarnings = FALSE, recursive = TRUE)
 ```
 
+
 # Main
 
-## Load the gene sets
+## Load the single-cell data
 
-GO BP
+We want to collect some gene and comparison level meta data.
+
 ```{r}
-gobp_file <- file.path(GS_DIR, 'GO_Biological_Process_2021.tsv')
-gobp_genesets <- cb_enrichr_gsets(filepath = gobp_file)
-gobp_immune_file <- file.path(GS_DIR, 'GO_Biological_Process_2021_immune.Rds')
-gobp_immune_genesets <- readRDS(file = gobp_immune_file)
-gobp_unspecific <- readr::read_tsv(file = file.path(OUT_DIR, 'immune_GOBP_2021_unspecific_terms.tsv'), col_names = FALSE)$X1
+comp_data <- readRDS(file = file.path(DATA_DIR, 'immune_comp_data.Rds'))
+gene_mean_breaks <- c(-Inf, 0.1, 1, Inf)
+
+comp_data_md <- lapply(names(comp_data), function(comp_raw) {
+  comp <- stringr::str_replace_all(string = comp_raw, pattern = ' ', replacement = '_')
+  group_means <- sctransform:::row_mean_grouped_dgcmatrix(matrix = comp_data[[comp_raw]]$counts, 
+                                                          group = comp_data[[comp_raw]]$cell_metadata$group_id, shuffle = FALSE)
+  data.frame(feature = rownames(group_means),
+             mean1 = group_means[, 1],
+             mean2 = group_means[, 2], 
+             row.names = NULL) %>%
+    mutate(
+      obs_mean = expm1((log1p(mean1) + log1p(mean2)) / 2),
+      expr_grp = cut(obs_mean, breaks = gene_mean_breaks, labels = c('low', 'medium', 'high')),
+      comparison = comp
+    ) %>%
+    select(feature, expr_grp, comparison)
+}) %>% dplyr::bind_rows()
+table(comp_data_md$comparison, comp_data_md$expr_grp)
 ```
 
-ImmuneSigDB
+
+## Load the bulk data results
+
 ```{r}
-sigdb_file <- file.path(GS_DIR, 'IMMUNESIGDB_genesets.Rds')
-sigdb_genesets <- readRDS(sigdb_file)
-sigdb_expected_file <- file.path(GS_DIR, 'IMMUNESIGDB_genesets_expected.Rds')
-sigdb_expected_genesets <- readRDS(file = sigdb_expected_file)
+bp_res <- readRDS(file = file.path(BP_DIR, 'blueprint_immune_comparisons.Rds'))
+bp_res_names <- sapply(bp_res, function(x) paste(x$comp[1], x$comp[2], sep = '_vs_'))
+names(bp_res) <- bp_res_names
+print(bp_res_names)
 ```
 
-## Process the results
+
+## Process the pipeline results
 
 We do this per comparison
 ```{r}
@@ -59,31 +77,28 @@ comps <- list.files(path = RES_DIR, full.names = FALSE) %>%
 print(comps)
 ```
 
-
 ```{r}
+res_list <- list()
 for (comp in comps) {
   message(comp)
   
-  # extract the celltypes being compared; also fix the names to match what isigDB uses
-  comp_types <- stringr::str_split(string = comp, pattern = '_vs_')[[1]] %>%
-    stringr::str_remove(pattern = '_') %>%
-    stringr::str_remove(pattern = 'S$')
+  # extract the celltypes being compared; 
+  # also fix the comparison order as used in the blueprint comparisons
+  comp_types <- stringr::str_split(string = comp, pattern = '_vs_')[[1]] 
+  comp_ordered <- paste(sort(comp_types), collapse = '_vs_')
   
-  # merge GOBP and relevant isigDB gene sets
-  #comp_sigdb <- unlist(sigdb_expected_genesets[[comp]])
-  #genesets <- c(gobp_genesets, sigdb_genesets[ comp_sigdb ])
+  # get the blueprint results
+  bp_de_res <- bp_res[[comp_ordered]]$de_res
   
   # run GSEA per DE pipeline
   rds_files <- list.files(path = RES_DIR, pattern = paste0('^', comp, '.*\\.Rds$'), full.names = TRUE)
-  # for testing: f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-edger_qlf_7pr.Rds"
   
-  gsea_list <- future_lapply(rds_files, FUN = function(f) {
-    
-    f_parts <- stringr::str_split(string = stringr::str_remove(basename(f), pattern = '\\.Rds$'), pattern = '-')[[1]]
-    transformation <- f_parts[2]
-    de_method <- f_parts[3]
-    pipeline <- paste(transformation, de_method, sep = '-')
-    
+  comp_res <- lapply(rds_files, function(f) {
+    # for testing: f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-edger_qlf_7pr.Rds"
+    #f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-edger_qlf_7pr.Rds"
+    #f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-sum1-mast.Rds"
+    #f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-qlrt_7pr.Rds"
+    #f <- "/home/rstudio/mnt_out/results/immune_data/T_CELLS_vs_MONOCYTES-counts-limma_voom_7pr.Rds"
     res <- readRDS(f)
     de_res <- res$res %>% 
       mutate(pval = case_when(is.na(pval) ~ 1, TRUE ~ pval),
@@ -91,84 +106,48 @@ for (comp in comps) {
              pred_de = FDR < 0.05,
              pred_de3 = factor(effect_direction * (FDR < 0.05), levels = c(-1, 0, 1)))
     
-    # run gsea twice; once per effect direction; then merge and keep highest ranking result for the GOBP sets
+    de_res <- left_join(de_res, bp_de_res, by = c('feature' = 'symbol')) %>%
+      filter(!is.na(grp1), !is.na(grp2)) # filter out NA in grp1, grp2 (non-matching gene names)?
     
-    # merge GOBP and relevant isigDB gene sets for direction 1
-    comp_sigdb <- sigdb_expected_genesets[[comp]][[comp_types[2]]]
-    genesets <- c(gobp_genesets, sigdb_genesets[ comp_sigdb ])
+    # proxy for precision: fraction of DE genes that is in core bulk DE set
+    # proxy for sensitivity: fraction of core bulk DE set that is DE
+    if (comp_ordered != comp) {
+      de_res <- mutate(de_res, bulk_de3 = grp1 - grp2)
+    } else {
+      de_res <- mutate(de_res, bulk_de3 = grp2 - grp1)
+    }
     
-    gsea_res_pos <- de_res %>% 
-      summarise(cb_hyper(signature = as.character(feature[pred_de3 == 1]), 
-                         background = as.character(feature), 
-                         genesets = genesets, 
-                         collapse = FALSE, 
-                         min_size = 3, 
-                         max_size = Inf, 
-                         verbose = TRUE)) %>%
-      select(-hits) %>%
-      mutate(transformation = transformation, de_method = de_method, pipeline = pipeline)
+    # core DE means full agreement between all bulk methods
+    de_res <- mutate(de_res, bulk_de3 = case_when(bulk_de3 < 1 & bulk_de3 > -1 ~ 0, TRUE ~ bulk_de3))
+    # merge with feature level meta data from input data
+    de_res <- left_join(de_res, filter(comp_data_md, comparison == comp), by = c('feature'))
     
-    # merge GOBP and relevant isigDB gene sets for direction 1
-    comp_sigdb <- sigdb_expected_genesets[[comp]][[comp_types[1]]]
-    genesets <- c(gobp_genesets, sigdb_genesets[ comp_sigdb ])
+    performance <- summarise(de_res, perf_metrics(pred_de3, bulk_de3)) 
+    performance_strat <- group_by(de_res, expr_grp) %>%
+      summarise(perf_metrics(pred_de3, bulk_de3), .groups = 'drop')
+    performance_sum <- dplyr::bind_rows(performance, performance_strat)
     
-    gsea_res_neg <- de_res %>% 
-      summarise(cb_hyper(signature = as.character(feature[pred_de3 == -1]), 
-                         background = as.character(feature), 
-                         genesets = genesets, 
-                         collapse = FALSE, 
-                         min_size = 3, 
-                         max_size = Inf, 
-                         verbose = TRUE)) %>%
-      select(-hits) %>%
-      mutate(transformation = transformation, de_method = de_method, pipeline = pipeline)
-    
-    gsea_res <- bind_rows(gsea_res_pos, gsea_res_neg) %>%
-      group_by(label) %>%
-      slice_min(order_by = pval) %>%
-      ungroup() %>%
-      arrange(pval)
-    
-    return(gsea_res)
-    
-  }, future.seed=TRUE)
-  
-  gsea_res <- as_tibble(data.table::rbindlist(gsea_list)) %>%
-    mutate(across(where(is.character), as.factor)) %>%
-    mutate(is_gobp = grepl(pattern = '\\(GO:\\d+\\)$', x = label),
-           is_gobp_immune = label %in% gobp_immune_genesets,
-           is_gobp_unspecific = label %in% gobp_unspecific,
-           is_sigdb_expected = label %in% unlist(sigdb_expected_genesets[[comp]]))
-  saveRDS(gsea_res, file = file.path(OUT_DIR, sprintf('gsea_%s.Rds', comp))) 
-}
-```
-
-
-## Collect the timing
-
-```{r}
-timing_list <- list()
-
-for (comp in comps) {
-  message(comp)
-  
-  rds_files <- list.files(path = RES_DIR, pattern = paste0('^', comp, '.*\\.Rds$'), full.names = TRUE)
-
-  timing_res <- lapply(rds_files, FUN = function(f) {
-    timing <- readRDS(f)$timing
-    data.frame(transformation = filter(timing, step == 'transformation')$name,
-               de_method = filter(timing, step == 'de_method')$name,
-               transformation_time = filter(timing, step == 'transformation')$time,
-               de_method_time = filter(timing, step == 'de_method')$time) %>%
-      mutate(time = transformation_time + de_method_time, comp = comp)
+    bind_cols(
+      tidyr::pivot_wider(res$timing, names_from = step, values_from = c(name, time)),
+      performance_sum 
+    ) %>%
+      mutate(comparison = comp) 
   }) %>% bind_rows()
   
-  timing_list[[comp]] <- timing_res
+  res_list[[comp]] <- comp_res
 }
+sum_res <- bind_rows(res_list) %>%
+  dplyr::rename(transformation = name_transformation, 
+                de_method = name_de_method) %>%
+  mutate(time = time_transformation + time_de_method,
+         pipeline = paste(transformation, de_method, sep = '-'))
 
-timing_res <- bind_rows(timing_list)
-saveRDS(timing_res, file = file.path(OUT_DIR, 'timing_results.Rds')) 
 ```
+
+```{r}
+saveRDS(sum_res, file = file.path(OUT_DIR, 'performance_immune_data.Rds')) 
+```
+
 
 # Appendix
 
