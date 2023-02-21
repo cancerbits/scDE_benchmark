@@ -1,0 +1,231 @@
+---
+title: 'Make additional figures'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+source('R/utilities.R')
+
+library('ggplot2')
+library('ggrepel')
+library('dplyr')
+library('patchwork')
+library('scales')
+
+FIG_DIR <- file.path(config$out_root, 'figures', 'supp')
+SIM_DIR <- file.path(config$out_root, 'results', 'simulated_data_summarized')
+IMM_DIR <- file.path(config$out_root, 'results', 'immune_data_summarized')
+```
+
+# Main
+
+## Load the two tables and join
+
+```{r}
+res_immune <- readRDS(file = file.path(IMM_DIR, 'final_ranking_immune.Rds'))$fr
+res_sim <- readRDS(file = file.path(SIM_DIR, 'final_ranking_sim_data.Rds'))$fr
+
+res <- left_join(res_sim, res_immune, by = c('transformation', 'de_method', 'pipeline')) %>%
+  mutate(`Uses pseudo-bulk` = grepl(pattern = '\\dpr', de_method))
+```
+
+## Plot time (transformations)
+
+Get timing from simulation experiments
+
+```{r}
+res_files <- list.files(SIM_DIR, pattern = 'performance_', full.names = TRUE)
+
+trans_time <- lapply(res_files, function(f) {readRDS(f)}) %>% 
+  bind_rows() %>%
+  filter(is.na(expr_grp)) %>%
+  group_by(experiment, transformation) %>%
+  summarise(mean_time = mean(time_trans), .groups = 'drop')
+```
+
+```{r}
+ggplot(trans_time, aes(transformation, mean_time, fill = experiment)) +
+  geom_bar(stat = 'identity') +
+  ylab('Time in seconds') +
+  xlab('Transformation') +
+  coord_flip()
+```
+
+
+```{r}
+sum_time <- group_by(trans_time, transformation) %>%
+  summarise(total_time = sum(mean_time), .groups = 'drop') %>%
+  arrange(-total_time) %>%
+  mutate(transformation = forcats::fct_reorder(transformation, -total_time))
+
+sum_time
+
+trans_time$transformation <- factor(as.character(trans_time$transformation), levels = levels(sum_time$transformation))
+
+ggplot(trans_time, aes(transformation, mean_time, fill = experiment)) +
+  geom_bar(stat = 'identity') +
+  ylab('Time in seconds') +
+  xlab('Transformation') +
+  geom_text(data = sum_time, aes(transformation, total_time+0.3, fill = NA,
+                                 label = round(total_time, 1)),
+            size = 3, hjust = 0) +
+  coord_flip(ylim = c(0, max(sum_time$total_time)+14), expand = FALSE) +
+  theme_classic()
+```
+
+```{r}
+fname <- 'transformation_time'
+ggsave(filename = file.path(FIG_DIR, sprintf('%s.pdf', fname)), width = 7, height = 5)
+```
+
+## Plot time (DE methods)
+
+Get timing from simulation experiments
+
+```{r}
+res_files <- list.files(SIM_DIR, pattern = 'performance_', full.names = TRUE)
+
+de_time <- lapply(res_files, function(f) {readRDS(f)}) %>% 
+  bind_rows() %>%
+  filter(is.na(expr_grp)) %>%
+  group_by(de_method, transformation, experiment) %>%
+  summarise(mean_time = mean(time_de), .groups = 'drop')
+```
+
+```{r}
+ggplot(de_time, aes(de_method, mean_time, color = experiment)) +
+  geom_point() +
+  ylab('Time in seconds') +
+  xlab('DE method') +
+  coord_flip()
+ggplot(de_time, aes(de_method, log1p(mean_time), color = experiment)) +
+  geom_point() +
+  ylab('Time in seconds [log1p]') +
+  xlab('DE method') +
+  coord_flip()
+```
+
+Choose best-case wrt transformation for each DE method
+
+```{r}
+pipelines_bc <- group_by(de_time, de_method, transformation) %>%
+  summarise(mean_time = mean(mean_time)) %>% 
+  group_by(de_method) %>%
+  slice_min(order_by = mean_time, n = 1, with_ties = FALSE) %>%
+  mutate(pipeline = paste(transformation, de_method, sep = '-')) %>%
+  pull(pipeline)
+```
+
+```{r}
+mutate(de_time, pipeline = paste(transformation, de_method, sep = '-')) %>%
+  filter(pipeline %in% pipelines_bc) %>%
+  ggplot(aes(de_method, mean_time, fill = experiment)) +
+  geom_bar(stat = 'identity') +
+  ylab('Time in seconds') +
+  xlab('DE method') +
+  coord_flip()
+```
+
+```{r}
+plot_data <- mutate(de_time, pipeline = paste(transformation, de_method, sep = '-')) %>%
+  filter(pipeline %in% pipelines_bc)
+plot_data_total <- group_by(plot_data, de_method) %>%
+  summarise(total_time = sum(mean_time), .groups = 'drop') %>%
+  arrange(-total_time) %>%
+  mutate(de_method = forcats::fct_reorder(de_method, -total_time))
+
+plot_data_total
+
+plot_data$de_method <- factor(as.character(plot_data$de_method), levels = levels(plot_data_total$de_method))
+
+ggplot(plot_data, aes(de_method, mean_time, fill = experiment)) +
+  geom_bar(stat = 'identity') +
+  ylab('Time in seconds') +
+  xlab('DE method') +
+  geom_text(data = plot_data_total, aes(de_method, total_time+2, fill = NA,
+                                 label = round(total_time, 1)),
+            size = 3, hjust = 0) +
+  coord_flip(ylim = c(0, max(plot_data_total$total_time)+156), expand = FALSE) +
+  theme_classic()
+
+fname <- 'de_method_time'
+ggsave(filename = file.path(FIG_DIR, sprintf('%s.pdf', fname)), width = 7, height = 8)
+```
+
+Show log-times
+
+```{r}
+ggplot(plot_data, aes(de_method, log10(mean_time+1), color = experiment)) +
+  scale_y_continuous(breaks = log10(c(1, 10, 30, 60, 600, 1800)+1), 
+                     labels = c('1 sec', '10 sec', '30 sec', '1 min', '10 min', '30 min')) +
+  annotation_logticks(sides = 'b') +
+  geom_point() +
+  ylab('Time on log-scale') +
+  xlab('DE method') +
+  coord_flip() +
+  theme_classic()
+
+fname <- 'de_method_time_logscale'
+ggsave(filename = file.path(FIG_DIR, sprintf('%s.pdf', fname)), width = 7, height = 8)
+```
+
+## Plot number of PR
+
+```{r}
+res <- mutate(res, pr = stringr::str_extract(de_method, '\\d+(?=pr$)'))
+plot_data <- filter(res, transformation == 'counts', !is.na(pr)) %>%
+  group_by(de_method, pr) %>%
+  summarize(avg_score = (score.x + score.y) / 2, .groups = 'drop') %>%
+  mutate(de_method = stringr::str_remove(de_method, '_\\d+pr$'))
+ggplot(plot_data, aes(de_method, avg_score, fill = pr)) +
+  geom_bar(stat = 'identity', position = 'dodge') +
+  coord_flip() +
+  xlab('DE method') +
+  ylab('Average score') +
+  scale_fill_brewer(name = 'Number of\npseudo-\nreplicates', type = 'qual', palette = 'Set1')
+
+fname <- 'de_method_score_vs_pr'
+ggsave(filename = file.path(FIG_DIR, sprintf('%s.pdf', fname)), width = 6, height = 4)
+
+ggplot(plot_data, aes(de_method, avg_score, color = pr, shape = pr)) +
+  geom_point(position = position_dodge(width = 0.9)) +
+  coord_flip() +
+  xlab('DE method') +
+  ylab('Average score') +
+  scale_color_brewer(name = 'Number of\npseudo-\nreplicates', type = 'qual', palette = 'Set1') +
+  scale_shape_discrete(name = 'Number of\npseudo-\nreplicates')
+
+fname <- 'de_method_score_vs_pr_v2'
+ggsave(filename = file.path(FIG_DIR, sprintf('%s.pdf', fname)), width = 5, height = 3)
+```
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```
+
+Future plan
+```{r}
+future::plan()
+```
+
+More session info
+```{r}
+devtools::session_info()
+```

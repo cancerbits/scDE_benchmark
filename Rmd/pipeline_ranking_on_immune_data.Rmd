@@ -97,7 +97,7 @@ metrics_wide <- filter(sum_res, is.na(expr_grp)) %>%
 Save final ranking 
 ```{r}
 saveRDS(list(fr = fr, metrics_wide = metrics_wide), 
-        file = file.path(config$out_root, 'results', 'final_ranking_immune.Rds'))
+        file = file.path(config$out_root, 'results', 'immune_data_summarized', 'final_ranking_immune.Rds'))
 ```
 
 

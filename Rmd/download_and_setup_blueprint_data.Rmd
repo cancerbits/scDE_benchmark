@@ -100,6 +100,8 @@ colnames(bp_mat) <- bp_md$sample_id
 
 table(bp_md$`Sub-group`, bp_md$immune_group)
 table(bp_md$immune_group)
+table(bp_md$immune_group, bp_md$Donor)
+rowSums(table(bp_md$immune_group, bp_md$Donor) > 0)
 ```
 
 Save
@@ -109,50 +111,16 @@ outf <- file.path(DATA_DIR, 'blueprint_data.Rds')
 saveRDS(object = list(expected_counts = bp_mat, meta_data = bp_md), file = outf)
 ```
 
-# Run DE and GSEA analysis
+# Run DE analysis
 
-Download gene sets
+ID mapping helpers
 ```{r}
-# gobp_url <- 'https://maayanlab.cloud/Enrichr/geneSetLibrary?mode=text&libraryName=GO_Biological_Process_2021'
-# gobp_file <- file.path(GS_DIR, paste0(stringr::str_extract(gobp_url, pattern = '[^=]+$'), '.tsv'))
-# if (!file.exists(gobp_file)) {
-#   download.file(url = gobp_url, destfile = gobp_file)
-# }
-# 
-# reactome_url <- 'https://maayanlab.cloud/Enrichr/geneSetLibrary?mode=text&libraryName=Reactome_2022'
-# reactome_file <- file.path(GS_DIR, paste0(stringr::str_extract(reactome_url, pattern = '[^=]+$'), '.tsv'))
-# if (!file.exists(reactome_file)) {
-#   download.file(url = reactome_url, destfile = reactome_file)
-# }
-# 
-# chea_url <- 'https://maayanlab.cloud/Enrichr/geneSetLibrary?mode=text&libraryName=ChEA_2022'
-# chea_file <- file.path(GS_DIR, paste0(stringr::str_extract(chea_url, pattern = '[^=]+$'), '.tsv'))
-# if (!file.exists(chea_file)) {
-#   download.file(url = chea_url, destfile = chea_file)
-# }
-# 
-# gtex_url <- 'https://maayanlab.cloud/Enrichr/geneSetLibrary?mode=text&libraryName=GTEx_Tissue_Expression_Up'
-# gtex_file <- file.path(GS_DIR, paste0(stringr::str_extract(gtex_url, pattern = '[^=]+$'), '.tsv'))
-# if (!file.exists(gtex_file)) {
-#   download.file(url = gtex_url, destfile = gtex_file)
-# }
-
-wikip_url <- 'https://maayanlab.cloud/Enrichr/geneSetLibrary?mode=text&libraryName=WikiPathway_2021_Human'
-wikip_file <- file.path(GS_DIR, paste0(stringr::str_extract(wikip_url, pattern = '[^=]+$'), '.tsv'))
-if (!file.exists(wikip_file)) {
-  download.file(url = wikip_url, destfile = wikip_file)
-}
-
 GRCH38 <- select(annotables::grch38, ensgene, symbol)
 GRCH38 <- GRCH38[!duplicated(GRCH38), ]
-#GENESETS <- canceRbits::cb_enrichr_gsets(filepath = gobp_file)
-#GENESETS <- canceRbits::cb_enrichr_gsets(filepath = reactome_file)
-#GENESETS <- canceRbits::cb_enrichr_gsets(filepath = chea_file)
-#GENESETS <- canceRbits::cb_enrichr_gsets(filepath = gtex_file)
-GENESETS <- canceRbits::cb_enrichr_gsets(filepath = wikip_file)
 ```
 
-Create helper functions to run DE and GSEA
+
+Create helper functions to run DE 
 ```{r}
 run_bulk_de <- function(mat, grouping, de_method) {
   if (de_method == 'edger') {
@@ -189,29 +157,6 @@ de_consensus <- function(mat, grouping) {
   return(de_res)
 }
 
-gsea <- function(de_res) {
-  gsea_res1 <- summarise(de_res, canceRbits::cb_hyper(
-    signature = symbol[grp1 >= 1], 
-    background = symbol, 
-    genesets = GENESETS, 
-    min_size = 3, 
-    max_size = Inf, 
-    collapse = FALSE, 
-    verbose = TRUE
-    )) %>%
-    mutate(grp = 1)
-  gsea_res2 <- summarise(de_res, canceRbits::cb_hyper(
-    signature = symbol[grp2 >= 1], 
-    background = symbol, 
-    genesets = GENESETS, 
-    min_size = 3, 
-    max_size = Inf, 
-    collapse = FALSE, 
-    verbose = TRUE
-    )) %>%
-    mutate(grp = 2)
-  return(rbind(gsea_res1, gsea_res2))
-}
 ```
 
 
@@ -226,16 +171,11 @@ res <- lapply(comps, function(comp) {
   sel <- bp_md$immune_group %in% comp
   de_res <- de_consensus(mat = bp_mat[, sel], 
                          grouping = factor(bp_md$immune_group[sel], levels = comp))
-  gsea_res <- gsea(de_res)
-  return(list(comp = comp, de_res = de_res, gsea_res = gsea_res))
+  return(list(comp = comp, de_res = de_res))
 })
 
 outf <- file.path(RES_DIR, 'blueprint_immune_comparisons.Rds')
 saveRDS(object = res, file = outf)
-# gsea_res4 <- gsea(de_res4)
-# table(gsea_res4$fdr < 0.05, gsea_res4$grp)
-# filter(gsea_res4, fdr < 0.05, grp == 1) %>% arrange(fdr) %>% pull(label) %>% head(50)
-# filter(gsea_res4, fdr < 0.05, grp == 2) %>% arrange(fdr) %>% pull(label) %>% head(50)
 ```
 
 

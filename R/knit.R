@@ -6,11 +6,17 @@ config <- yaml::read_yaml("config.yaml")
 report_dir <- file.path(config$out_root, 'reports')
 dir.create(report_dir, recursive = TRUE, showWarnings = FALSE)
 
-# download and process the immune data
+# download and process the single-cell immune data
 # rmarkdown::render(input = 'Rmd/download_and_setup_immune_data.Rmd',
 #                   output_dir = report_dir,
 #                   knit_root_dir = config$project_root,
 #                   envir = new.env())
+
+# download and process the bulk immune data
+rmarkdown::render(input = 'Rmd/download_and_setup_blueprint_data.Rmd',
+                  output_dir = report_dir,
+                  knit_root_dir = config$project_root,
+                  envir = new.env())
 
 # simulate data using muscat
 # rmarkdown::render(input = 'Rmd/simulate_data.Rmd',
@@ -43,14 +49,14 @@ dir.create(report_dir, recursive = TRUE, showWarnings = FALSE)
 #                   envir = new.env())
 
 # summarize results on the immune data
-rmarkdown::render(input = 'Rmd/summarize_results_on_immune_data.Rmd',
-                  output_dir = report_dir,
-                  knit_root_dir = config$project_root,
-                  envir = new.env())
+# rmarkdown::render(input = 'Rmd/summarize_results_on_immune_data.Rmd',
+#                   output_dir = report_dir,
+#                   knit_root_dir = config$project_root,
+#                   envir = new.env())
 
 
 # rank pipelines on immune data
-# rmarkdown::render(input = 'Rmd/pipeline_ranking_on_immune_data_bp.Rmd',
+# rmarkdown::render(input = 'Rmd/pipeline_ranking_on_immune_data.Rmd',
 #                   output_dir = report_dir,
 #                   knit_root_dir = config$project_root,
 #                   envir = new.env())
