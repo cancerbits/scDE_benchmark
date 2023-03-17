@@ -13,10 +13,10 @@ dir.create(report_dir, recursive = TRUE, showWarnings = FALSE)
 #                   envir = new.env())
 
 # download and process the bulk immune data
-rmarkdown::render(input = 'Rmd/download_and_setup_blueprint_data.Rmd',
-                  output_dir = report_dir,
-                  knit_root_dir = config$project_root,
-                  envir = new.env())
+# rmarkdown::render(input = 'Rmd/download_and_setup_blueprint_data.Rmd',
+#                   output_dir = report_dir,
+#                   knit_root_dir = config$project_root,
+#                   envir = new.env())
 
 # simulate data using muscat
 # rmarkdown::render(input = 'Rmd/simulate_data.Rmd',
@@ -68,7 +68,7 @@ rmarkdown::render(input = 'Rmd/download_and_setup_blueprint_data.Rmd',
 #                   envir = new.env())
 
 # combined ranking of pipelines
-# rmarkdown::render(input = 'Rmd/pipeline_ranking_combined.Rmd',
-#                   output_dir = report_dir,
-#                   knit_root_dir = config$project_root,
-#                   envir = new.env())
+rmarkdown::render(input = 'Rmd/pipeline_ranking_combined.Rmd',
+                  output_dir = report_dir,
+                  knit_root_dir = config$project_root,
+                  envir = new.env())

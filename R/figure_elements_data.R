@@ -1,3 +1,5 @@
+# only run once to create cartoon-like figures of the data
+
 source('R/setup.R')
 source('R/utilities.R')
 source('R/transformations.R')
@@ -69,19 +71,21 @@ g <- ggplot(daf, aes(umap1, umap2, color = grp)) +
   geom_point(size = 1.4) +
   facet_wrap(~ experiment, scales = 'free', ncol = 2) +
   scale_color_manual(values = c(reds[5], blues[5])) +
-  theme_classic() +
+  theme_classic(base_size = 12) +
   theme(axis.ticks = element_blank(), axis.text = element_blank(), 
         axis.line = element_blank(), axis.title = element_blank()) +
-  theme(legend.position = "none")
+  theme(legend.position = "none") +
+  theme(strip.text.x = element_text(size = 14))
 
 fname <- 'simulated_data_umap'
-w <- 2.4
-h <- 2
-cairo_pdf(filename = file.path(FIG_DIR, sprintf('%s.pdf', fname)), width = w, height = h, pointsize = 13)
+size_factor <- 1.5
+w <- 2.6 * size_factor
+h <- 1.3 * size_factor
+cairo_pdf(filename = file.path(FIG_DIR, sprintf('%s.pdf', fname)), width = w, height = h, pointsize = 12)
 show(g)
 dev.off()
 
-svg(filename = file.path(FIG_DIR, sprintf('%s.svg', fname)), width = w, height = h, pointsize = 13)
+svg(filename = file.path(FIG_DIR, sprintf('%s.svg', fname)), width = w, height = h, pointsize = 12)
 show(g)
 dev.off()
 

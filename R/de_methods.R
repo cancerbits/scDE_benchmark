@@ -13,7 +13,7 @@ run_de <- function(mat, grouping, methods, seed = NULL) {
   i <- 0
   for (method in methods) {
     if (!is.null(seed)) {
-      set.seed(seed)
+      set.seed(seed = seed, kind = 'Mersenne-Twister', normal.kind = 'Inversion', sample.kind = 'Rejection')
     }
     i <- i + 1
     fn <- paste0('de_', method)

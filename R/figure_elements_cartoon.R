@@ -1,3 +1,5 @@
+# only run once to create toy data figures for introductory figure
+
 config <- yaml::read_yaml("config.yaml")
 
 FIG_DIR <- file.path(config$out_root, 'figures')
@@ -162,4 +164,27 @@ dev.off()
 
 svg(filename = file.path(FIG_DIR, sprintf('%s.svg', fname)), width = 1.8, height = 4, pointsize = 13)
 draw(hm3)
+dev.off()
+
+# Results cartoon
+
+pvals <- sapply(1:nrow(mat1tr), function(i) {
+  t.test(mat1tr[i, ], mat2tr[i, ])$p.value
+})
+resmat <- matrix(c(pvals, abs((pvals < 0.1) - 1)), nrow = length(pvals))
+colnames(resmat) <- c('p-val', 'is DE')
+hm4 <- Heatmap(resmat, col = hcl.colors(n = 9, palette = 'grays'),
+               cluster_rows = FALSE, cluster_columns = FALSE,
+               column_names_side = "top", 
+               show_heatmap_legend = FALSE,
+               border = TRUE, cell_fun = cf)
+draw(hm4)
+
+fname <- 'cartoon_res'
+cairo_pdf(filename = file.path(FIG_DIR, sprintf('%s.pdf', fname)), width = 0.7, height = 1.8, pointsize = 13)
+draw(hm4)
+dev.off()
+
+svg(filename = file.path(FIG_DIR, sprintf('%s.svg', fname)), width = 0.7, height = 1.8, pointsize = 13)
+draw(hm4)
 dev.off()

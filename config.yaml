@@ -5,12 +5,14 @@ project_docker: cancerbits/scde_benchmark
 # project-specific paths 
 # only the ones ending in _host should be changed
 # the others are paths used in the docker container
-project_root_host: /home/christoph_h/bioinf_isilon/Research/HALBRITTER/Internal/users/christoph_h/projects/scDE_benchmark
-out_root_host: /home/christoph_h/bioinf_isilon/Research/HALBRITTER/Internal/out/scDE_benchmark
+#project_root_host: /home/christoph_h/bioinf_isilon/Research/HALBRITTER/Internal/users/christoph_h/projects/scDE_benchmark
+#out_root_host: /home/christoph_h/bioinf_isilon/Research/HALBRITTER/Internal/out/scDE_benchmark
+project_root_host: /srv/share/Research/HALBRITTER/Internal/users/christoph_h/projects/scDE_benchmark
+out_root_host: /srv/share/Research/HALBRITTER/Internal/out/scDE_benchmark
 
 project_root: /home/rstudio
 out_root: /home/rstudio/mnt_out
 
 # control multi-threading
 OPENBLAS_NUM_THREADS: 1
-R_FUTURE_WORKERS: 20
+R_FUTURE_WORKERS: 120

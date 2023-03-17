@@ -7,8 +7,8 @@ time_diff <- function(start_time, end_time = NULL) {
   }
   dt_cpu <- lubridate::make_difftime(num = sum(end_time[c('user.self', 'sys.self')] - start_time[c('user.self', 'sys.self')]))
   dt_elapsed <- lubridate::make_difftime(num = end_time['elapsed'] - start_time['elapsed'])
-  
-  sprintf('Elapsed time: %1.2f %s; CPU time: %1.2f %s', 
+
+  sprintf('Elapsed time: %1.2f %s; CPU time: %1.2f %s',
           dt_elapsed, attr(x = dt_elapsed, which = 'units'),
           dt_cpu, attr(x = dt_cpu, which = 'units'))
 }
@@ -28,18 +28,20 @@ downsample_counts <- function(counts, frac = 0.70) {
 
 # helper to create pseudobulk from single-cell data
 pseudobulk <- function(counts, grouping) {
-  mat <- sapply(levels(grouping), function(gr) {
-    sparseMatrixStats::rowSums2(x = counts, cols = grouping == gr)
+  group_levels <- levels(grouping)
+  has_group <- !is.na(grouping)
+  mat <- sapply(group_levels, function(gr) {
+    sparseMatrixStats::rowSums2(x = counts, cols = has_group & grouping == gr)
   })
-  colnames(mat) <- levels(grouping)
+  colnames(mat) <- group_levels
   rownames(mat) <- rownames(counts)
   return(mat)
 }
 
-run_pipeline <- function(input_data, transformation, de_method, 
+run_pipeline <- function(input_data, transformation, de_method,
                          seed_trans = NULL, seed_de = NULL) {
   trans_out <- run_tr(mat = input_data$counts, transformation = transformation, seed = seed_trans)
-  de_out <- run_de(mat = trans_out$res, grouping = input_data$cell_metadata$group_id, 
+  de_out <- run_de(mat = trans_out$res, grouping = input_data$cell_metadata$group_id,
                    methods = de_method, seed = seed_de)
   # join the de results with the simulation parameters if they are available
   if ('sim_metadata' %in% names(input_data)) {
@@ -47,7 +49,7 @@ run_pipeline <- function(input_data, transformation, de_method,
   } else {
     res <- de_out$res
   }
-  
+
   timing <- data.frame(step = c('transformation', 'de_method'),
                        name = c(transformation, de_method),
                        time = c(trans_out$timing$time, de_out$timing$time))
@@ -97,7 +99,7 @@ three_way_confusion <- function(prediction, reference) {
 perf_metrics <- function(prediction, reference) {
   data.frame(n = length(reference)) %>%
     bind_cols(three_way_confusion(prediction, reference)) %>%
-    mutate(Precision = TP / (TP + FP), 
+    mutate(Precision = TP / (TP + FP),
            Sensitivity = TP / (TP + FN),
            Specificity = TN / (TN + FP),
            Bias = (TP + FP) / (TP + FN),

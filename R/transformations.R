@@ -12,7 +12,7 @@ run_tr <- function(mat, transformation, seed = NULL) {
     stop(fn, ' is not a known function')
   }
   if (!is.null(seed)) {
-    set.seed(seed)
+    set.seed(seed = seed, kind = 'Mersenne-Twister', normal.kind = 'Inversion', sample.kind = 'Rejection')
   }
   cat('run_tr:\t', fn, '\t')
   stime = system.time({

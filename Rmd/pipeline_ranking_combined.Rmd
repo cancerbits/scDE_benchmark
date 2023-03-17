@@ -81,7 +81,7 @@ tmp <- mutate(res, rank.x = rank(-score.x, ties.method = 'min'),
   mutate(score.x = round(score.x, 2), score.y = round(score.y, 2)) %>%
   select(transformation, de_method, score.x, score.y) %>%
   dplyr::rename('Transformation' = 'transformation',
-                'DE Method' = 'de_method',
+                'DE method' = 'de_method',
                 'Sim. score' = 'score.x',
                 'Imm. score' = 'score.y') %>%
   as.data.frame() %>%

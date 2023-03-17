@@ -150,6 +150,8 @@ Save final ranking
 ```{r}
 saveRDS(list(fr = fr, metrics_wide = prec_sens_wide), 
         file = file.path(config$out_root, 'results', 'final_ranking_simulated.Rds'))
+select(fr, pos, transformation, de_method, MCC_rescaled, FDR_low, FDR_high, score, time) %>%
+  readr::write_csv(file = file.path(config$out_root, 'results', 'final_ranking_simulation_experiments.csv'))
 ```
 
 
@@ -182,7 +184,7 @@ res_heatmap <- function(fr, prec_sens_wide, idx = 1:nrow(fr), do_rescale = TRUE,
   cell_fun = function(j, i, x, y, width, height, fill) {
             grid.text(sprintf("%2.0f", mat[i, j]*100), x, y, 
                       gp = gpar(fontsize = 8, 
-                                col = c('white', 'black')[(mat_rescaled[i, j] > 0.4) + 1]))
+                                col = c('gray75', 'black')[(mat_rescaled[i, j] > 0.4) + 1]))
   }
   if (!show_values) {
     cell_fun = NULL
@@ -198,24 +200,34 @@ res_heatmap <- function(fr, prec_sens_wide, idx = 1:nrow(fr), do_rescale = TRUE,
     FDR_low = anno_barplot(fr$FDR_low, bar_width = 1),
     FDR_high = anno_barplot(fr$FDR_high, bar_width = 1),
     Time = anno_barplot(fr$time, bar_width = 1),
-    annotation_name_rot = 45,
+    annotation_name_rot = 35,
     annotation_name_side = 'top',
+    annotation_name_offset = unit(6, "points"),
+    annotation_label = list(MCC_rescaled = expression("MCC"["rescaled"]), 
+                         FDR_low = expression("FDR"["low"]), 
+                         FDR_high = expression("FDR"["high"]), 
+                         Time = expression("Time"["seconds"])),
     gap = unit(6, "points"))
   
   anno_left <- rowAnnotation(
+    Rank = anno_text(fr$pos, 
+                     just = "left", show_name = TRUE, 
+                     width = unit(5, 'mm'), 
+                     gp = gpar(fontsize = 10)),
     Transformation = anno_text(fr$transformation, 
                                just = "left", show_name = TRUE, 
-                               width = unit(25, 'mm'), 
-                               gp = gpar(fontsize = 11)),
+                               width = unit(18, 'mm'), 
+                               gp = gpar(fontsize = 10)),
     `DE method` = anno_text(fr$de_method, 
                            just = "left", show_name = TRUE,
-                           gp = gpar(fontsize = 11)), 
+                           width = unit(27, 'mm'), 
+                           gp = gpar(fontsize = 10)), 
     PB = grepl(pattern = '\\dpr', fr$de_method),
     col = list(PB = c("FALSE" = "white", "TRUE" = "black")),
     gap = unit(10, "points"),
-    annotation_name_rot = 0,
-    annotation_name_align = TRUE,
+    annotation_name_rot = c(35, 35, 35, 0),
     annotation_name_side = 'top',
+    annotation_name_offset = unit(6, "points"),
     show_legend = FALSE)
   
   
@@ -232,6 +244,16 @@ res_heatmap <- function(fr, prec_sens_wide, idx = 1:nrow(fr), do_rescale = TRUE,
   if (!is.null(filename)) {
     cairo_pdf(filename = filename, width = fig_width, height = fig_height)
     show(ch)
+    decorate_annotation("FDR_low", {
+      grid.lines(c(0.05, 0.05), c(0, nrow(fr))+0.5, 
+                 gp = gpar(lty = 2, col = "red"), 
+                 default.units = "native")
+    })
+    decorate_annotation("FDR_high", {
+      grid.lines(c(0.05, 0.05), c(0, nrow(fr))+0.5, 
+                 gp = gpar(lty = 2, col = "red"), 
+                 default.units = "native")
+    })
     dev.off()
   }
   return(ch)
@@ -279,6 +301,7 @@ ch <- res_heatmap(fr, prec_sens_wide, idx = which(fr$FDR_high < 0.1),
 
 ```{r}
 fr$de_method_grp1 = stringr::str_remove_all(string = fr$de_method, pattern = '\\d+(?=pr)')
+fr <- mutate(fr, de_method_grp1 = stringr::str_remove_all(string = de_method_grp1, pattern = '_(ns|pc|dc|pf|10k|gm)'))
 table(fr$de_method_grp1)
 
 idx <- mutate(fr, idx = 1:nrow(fr)) %>%
@@ -288,7 +311,7 @@ idx <- mutate(fr, idx = 1:nrow(fr)) %>%
 
 ch <- res_heatmap(fr, prec_sens_wide, idx = idx,
                   filename = file.path(FIG_DIR, 'ranking_sim_data_filter1.pdf'), 
-                  fig_width = 7, fig_height = 6)
+                  fig_width = 7, fig_height = 5)
 
 fr <- mutate(fr, de_method_grp2 = stringr::str_remove_all(string = de_method_grp1, pattern = '_(lrt|wald|exact|qlf|trend|voom)$'))
 fr <- mutate(fr, de_method_grp2 = stringr::str_remove_all(string = de_method_grp2, pattern = '_(ns|pc|dc|pf|10k|gm)'))
