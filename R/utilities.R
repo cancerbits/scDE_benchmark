@@ -1,4 +1,4 @@
-# example of an R file with a helper function
+# define helper functions
 
 # pretty print a time difference between two proc.time() calls
 time_diff <- function(start_time, end_time = NULL) {
@@ -114,12 +114,4 @@ perf_metrics <- function(prediction, reference) {
            PSS = (TP / (TP + FN)) - (FP / (FP + TN)),
            OR = (TP * TN) / (FP * FN),
            ORSS = (OR - 1) / (OR + 1))
-}
-
-# subset a list of genesets to those that are offspring of a specific go_id
-# genesets is a named list of character vectors, the names contain the gene set ids
-subset_go_genesets <- function(genesets, go_id) {
-  gset_ids <- stringr::str_extract(string = names(genesets), pattern = 'GO:\\d+')
-  gset_keep <- gset_ids %in% as.list(GO.db::GOBPOFFSPRING)[[go_id]]
-  return(genesets[gset_keep])
 }

@@ -94,11 +94,6 @@ for (comp in comps) {
   rds_files <- list.files(path = RES_DIR, pattern = paste0('^', comp, '.*\\.Rds$'), full.names = TRUE)
   
   comp_res <- lapply(rds_files, function(f) {
-    # for testing: f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-edger_qlf_7pr.Rds"
-    #f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-edger_qlf_7pr.Rds"
-    #f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-sum1-mast.Rds"
-    #f <- "/home/rstudio/mnt_out/results/immune_data/MONOCYTES_vs_B_CELLS-counts-qlrt_7pr.Rds"
-    #f <- "/home/rstudio/mnt_out/results/immune_data/T_CELLS_vs_MONOCYTES-counts-limma_voom_7pr.Rds"
     res <- readRDS(f)
     de_res <- res$res %>% 
       mutate(pval = case_when(is.na(pval) ~ 1, TRUE ~ pval),

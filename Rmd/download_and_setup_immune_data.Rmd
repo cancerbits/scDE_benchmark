@@ -20,8 +20,6 @@ library('Seurat')
 library('canceRbits')
 library('patchwork')
 source('R/utilities.R')
-#source('R/de_methods.R')
-#source('R/transformations.R')
 ```
 
 # Download data and apply our standard workflow

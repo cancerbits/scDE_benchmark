@@ -30,20 +30,6 @@ run_de <- function(mat, grouping, methods, seed = NULL) {
   return(list(timing = timing, res = res))
 }
 
-# simple effect size estimation: difference of medians
-effect_size <- function(mat, grouping) {
-  sel1 <- grouping == levels(grouping)[1]
-  sel2 <- grouping == levels(grouping)[2]
-  mat1 <- mat[, sel1, drop = FALSE]
-  mat2 <- mat[, sel2, drop = FALSE]
-  if (inherits(x = mat, what = 'dgCMatrix')) {
-    median_diff <- sparseMatrixStats::rowMedians(mat1) - sparseMatrixStats::rowMedians(mat2)
-  } else {
-    median_diff <- matrixStats::rowMedians(mat1) - matrixStats::rowMedians(mat2)
-  }
-  return(median_diff)
-}
-
 ## single-cell methods operating on expression data of any kind (any transformation)
 
 # riffle with empirical p-value

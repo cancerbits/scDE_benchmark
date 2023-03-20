@@ -21,14 +21,6 @@ source('R/de_methods.R')
 library('dplyr')
 library('future.apply')
 
-#library('Seurat')
-#library('dplyr')
-#library('Matrix')
-#library('SingleCellExperiment')
-
-#OUT_DIR <- file.path(config$out_root, 'simulated_data')
-#dir.create(path = OUT_DIR, showWarnings = FALSE, recursive = TRUE)
-
 DATA_DIR <- file.path(config$out_root, 'simulated_data')
 REPLICATES <- 13
 OUT_DIR <- file.path(config$out_root, 'results', 'simulated_data')

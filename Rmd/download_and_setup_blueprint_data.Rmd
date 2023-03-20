@@ -21,7 +21,6 @@ library('canceRbits')
 library('patchwork')
 source('R/utilities.R')
 source('R/de_methods.R')
-#source('R/transformations.R')
 
 DATA_DIR <- file.path(config$out_root, 'immune_data')
 GS_DIR <- file.path(config$out_root, 'geneset_data')

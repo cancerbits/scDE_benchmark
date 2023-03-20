@@ -22,14 +22,6 @@ library('dplyr')
 library('future.apply')
 library('Matrix')
 
-#library('Seurat')
-#library('dplyr')
-#library('Matrix')
-#library('SingleCellExperiment')
-
-#OUT_DIR <- file.path(config$out_root, 'simulated_data')
-#dir.create(path = OUT_DIR, showWarnings = FALSE, recursive = TRUE)
-
 DATA_DIR <- file.path(config$out_root, 'immune_data')
 OUT_DIR <- file.path(config$out_root, 'results', 'immune_data')
 dir.create(path = OUT_DIR, showWarnings = FALSE, recursive = TRUE)
