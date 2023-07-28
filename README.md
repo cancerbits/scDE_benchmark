@@ -23,7 +23,7 @@ The file `R/knit.R` calls all `Rmd/*.Rmd` files in order to reproduce the analys
 
 ## Links
 
-**Paper:** [https://doi.org](https://doi.org)
+**Paper:** [bioRxiv preprint](https://doi.org/10.1101/2023.03.28.534443)
 
 **R package:** [DElegate](https://github.com/cancerbits/DElegate)
 
