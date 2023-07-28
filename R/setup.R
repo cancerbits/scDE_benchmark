@@ -5,6 +5,7 @@ config <- yaml::read_yaml(CONFIG_FILE)
 
 # configure multi-threading
 RhpcBLASctl::blas_set_num_threads(config$OPENBLAS_NUM_THREADS)
+RhpcBLASctl::omp_set_num_threads(config$OMP_NUM_THREADS)
 options(future.globals.maxSize = 8 * 1024 ^ 3)
 options(parallelly.fork.enable = TRUE)
 future::plan(strategy = 'future::multicore', workers = config$R_FUTURE_WORKERS)

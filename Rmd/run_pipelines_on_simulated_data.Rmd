@@ -66,7 +66,8 @@ Create data frame of pipelines
 pipelines <- full_join(transformations, de_tests, by = character(), suffix = c(".trans", ".de")) %>%
   filter(`use with transformation` == 'ANY' | 
          (`use with transformation` == 'COUNTS' & grepl(pattern = 'counts', x = name.trans)) | 
-         (`use with transformation` == 'SPARSE' & `result is sparse`))
+         (`use with transformation` == 'SPARSE' & `result is sparse`) |
+         (`use with transformation` == 'POS' & `result is pos`))
 ```
 
 Go over the files, create list of jobs and run them

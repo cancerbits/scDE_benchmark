@@ -67,8 +67,11 @@ head(SummarizedExperiment::rowData(ref))
 Simulate data with different parameters
 
 ```{r}
-p_de <- 0.1
-p_dd <- c(1-p_de, 0, p_de, 0, 0, 0)
+p_diff <- 0.1
+p_de <- p_diff / 2
+p_dp <- p_diff / 4
+p_dm <- p_diff / 4
+p_dd <- c(1-p_diff, 0, p_de, p_dp, p_dm, 0)
 nc <- 400
 
 N <- 13
@@ -137,6 +140,84 @@ for (i in 1:N) {
 }
 saveRDS(object = res, file = file.path(OUT_DIR, 'sim_data_200_vs_2k.Rds'))
 ```
+
+Repeat all simulations with fewer DE genes
+
+```{r}
+p_diff <- 0.01
+p_de <- p_diff / 2
+p_dp <- p_diff / 4
+p_dm <- p_diff / 4
+p_dd <- c(1-p_diff, 0, p_de, p_dp, p_dm, 0)
+nc <- 400
+
+N <- 13
+res <- list()
+for (i in 1:N) {
+  this_sim <- muscat::simData(ref, p_dd = p_dd, nc = nc, ns = 1, paired = FALSE)
+  print(table(this_sim$sample_id))
+  print(metadata(this_sim)$ref_sids)
+  
+  res[[i]] <- list(counts = Matrix(assay(this_sim, 'counts')),
+                   cell_metadata = colData(this_sim),
+                   sim_metadata = metadata(this_sim)[c('experiment_info', 'n_cells', 'gene_info', 'ref_sids')])
+}
+saveRDS(object = res, file = file.path(OUT_DIR, 'sim_data_fewDE_200_vs_200.Rds'))
+```
+
+Here we save only 10% of both groups.
+```{r}
+N <- 13
+res <- list()
+for (i in 1:N) {
+  this_sim <- muscat::simData(ref, p_dd = p_dd, nc = round(nc * 0.1), ns = 1, paired = FALSE)
+  print(table(this_sim$sample_id))
+  print(metadata(this_sim)$ref_sids)
+  
+  res[[i]] <- list(counts = Matrix(assay(this_sim, 'counts')),
+                   cell_metadata = colData(this_sim),
+                   sim_metadata = metadata(this_sim)[c('experiment_info', 'n_cells', 'gene_info', 'ref_sids')])
+}
+saveRDS(object = res, file = file.path(OUT_DIR, 'sim_data_fewDE_20_vs_20.Rds'))
+```
+
+Here we create ten times as many cells for both groups.
+```{r}
+N <- 13
+res <- list()
+for (i in 1:N) {
+  this_sim <- muscat::simData(ref, p_dd = p_dd, nc = nc * 10, ns = 1, paired = FALSE)
+  print(table(this_sim$sample_id))
+  print(metadata(this_sim)$ref_sids)
+  
+  res[[i]] <- list(counts = Matrix(assay(this_sim, 'counts')),
+                   cell_metadata = colData(this_sim),
+                   sim_metadata = metadata(this_sim)[c('experiment_info', 'n_cells', 'gene_info', 'ref_sids')])
+}
+saveRDS(object = res, file = file.path(OUT_DIR, 'sim_data_fewDE_2k_vs_2k.Rds'))
+```
+
+An unbalanced version (200 vs 2000)
+
+```{r}
+N <- 13
+res <- list()
+for (i in 1:N) {
+  this_sim <- muscat::simData(ref, p_dd = p_dd, nc = nc * 10, ns = 1, paired = FALSE)
+  sample_tab <- table(this_sim$sample_id)
+  print(sample_tab)
+  print(metadata(this_sim)$ref_sids)
+  
+  keep <- sort(sample(x = which(this_sim$sample_id == names(sample_tab)[1]), size = round(sample_tab[1] * 0.1)))
+  keep <- c(keep, which(this_sim$sample_id == names(sample_tab)[2]))
+  print(table(this_sim$sample_id[keep]))
+  res[[i]] <- list(counts = Matrix(assay(this_sim, 'counts'))[, keep],
+                   cell_metadata = colData(this_sim)[keep, ],
+                   sim_metadata = metadata(this_sim)[c('experiment_info', 'n_cells', 'gene_info', 'ref_sids')])
+}
+saveRDS(object = res, file = file.path(OUT_DIR, 'sim_data_fewDE_200_vs_2k.Rds'))
+```
+
 
 
 # Appendix

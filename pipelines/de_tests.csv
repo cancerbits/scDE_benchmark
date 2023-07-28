@@ -1,10 +1,11 @@
-﻿group,name,use with transformation,size factor methods,pseudo replicates
+group,name,use with transformation,size factor methods,pseudo replicates
 non-parametric,random_emp,ANY,,
 non-parametric,random_app,ANY,,
 non-parametric,wilcox,ANY,,
 gaussian model,ttest,ANY,,
 logistic model,logreg,ANY,,
 hurdle model,mast,SPARSE,,
+differential distribution,scdd,POS,,
 gamma-poisson/NB model,qlrt,COUNTS,,
 gamma-poisson/NB model,qlrt_${sf},COUNTS,"10k, pf, ns, pc, dc, gm",
 gamma-poisson/NB model,scdeseq,COUNTS,,

@@ -185,6 +185,38 @@ de_mast <- function(mat, grouping) {
   return(res)
 }
 
+# scDD
+de_scdd <- function(mat, grouping) {
+  mat <- as.matrix(mat)
+  # create SingleCellExperiment object
+  sce <- SingleCellExperiment::SingleCellExperiment(
+    assays=list(normcounts = mat), 
+    colData = data.frame(group_id = grouping))
+  
+  prior_param <- list(alpha = 0.01, mu0 = 0, s0 = 0.01, a0 = 0.01, b0 = 0.01)
+  scDD_res <- scDD::scDD(SCdat = sce, 
+                         condition = 'group_id', 
+                         prior_param = prior_param, 
+                         testZeroes = TRUE, 
+                         categorize = FALSE, 
+                         param = BiocParallel::SerialParam()) %>%
+    scDD::results()
+  
+  res <- dplyr::select(scDD_res, gene, combined.pvalue) %>%
+    dplyr::rename(feature = gene, pval = combined.pvalue) %>%
+    dplyr::mutate(FDR = p.adjust(p = pval, method = 'fdr'))
+  
+  # add simple mean-based effect direction estimate
+  sel1 <- grouping == levels(grouping)[1]
+  sel2 <- grouping == levels(grouping)[2]
+  m1 <- matrixStats::rowMeans2(x = mat, useNames = FALSE, cols = sel1)
+  m2 <- matrixStats::rowMeans2(x = mat, useNames = FALSE, cols = sel2)
+  res$effect_direction = sign(m2 - m1)
+  
+  return(res)
+}
+
+
 ## single-cell methods operating on counts
 
 # quasi-likelihood ratio testing as implemented in glmGamPoi

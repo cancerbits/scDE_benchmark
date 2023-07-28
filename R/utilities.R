@@ -38,6 +38,17 @@ pseudobulk <- function(counts, grouping) {
   return(mat)
 }
 
+# helper for adding an effect direction
+# (used if a DE method does not return one)
+effect_direction_via_mean <- function(mat, grouping) {
+  sel1 <- grouping == levels(grouping)[1]
+  sel2 <- grouping == levels(grouping)[2]
+  mat <- as.matrix(mat)
+  m1 <- matrixStats::rowMeans2(x = mat, useNames = FALSE, cols = sel1)
+  m2 <- matrixStats::rowMeans2(x = mat, useNames = FALSE, cols = sel2)
+  return(sign(m1 / m2))
+}
+
 run_pipeline <- function(input_data, transformation, de_method,
                          seed_trans = NULL, seed_de = NULL) {
   trans_out <- run_tr(mat = input_data$counts, transformation = transformation, seed = seed_trans)

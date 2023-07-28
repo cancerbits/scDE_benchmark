@@ -1,18 +1,18 @@
-﻿group,name,result is sparse,size factor methods
-counts,counts,TRUE,
-glm-corrected counts,counts_sct,TRUE,
-glm-corrected counts,counts_sct2,TRUE,
-fractions,sum1,TRUE,
-shifted-log,sl_pc1,TRUE,
-shifted-log,sl_pc1_${sf},TRUE,"10k, pf, ns, pc, dc, gm"
-shifted-log,sl_pc5,FALSE,
-shifted-log,sl_pc5_${sf},FALSE,"10k, pf, ns, pc, dc, gm"
-scaled shifted-log,pf_sl_pf,TRUE,
-acosh,acosh,TRUE,
-acosh,acosh_${sf},TRUE,"10k, pf, ns, pc, dc, gm"
-glm-residuals,rt_rq,FALSE,
-glm-residuals,rt_pr_tgp,FALSE,
-glm-residuals,rt_pr_sct,FALSE,
-glm-residuals,rt_pr_sct2,FALSE,
-shifted-log of corrected counts,sl_pc1_sct,TRUE,
-shifted-log of corrected counts,sl_pc1_sct2,TRUE,
+group,name,result is sparse,result is pos,size factor methods
+counts,counts,TRUE,TRUE,
+glm-corrected counts,counts_sct,TRUE,TRUE,
+glm-corrected counts,counts_sct2,TRUE,TRUE,
+fractions,sum1,TRUE,TRUE,
+shifted-log,sl_pc1,TRUE,TRUE,
+shifted-log,sl_pc1_${sf},TRUE,TRUE,"10k, pf, ns, pc, dc, gm"
+shifted-log,sl_pc5,FALSE,TRUE,
+shifted-log,sl_pc5_${sf},FALSE,TRUE,"10k, pf, ns, pc, dc, gm"
+scaled shifted-log,pf_sl_pf,TRUE,TRUE,
+acosh,acosh,TRUE,TRUE,
+acosh,acosh_${sf},TRUE,TRUE,"10k, pf, ns, pc, dc, gm"
+glm-residuals,rt_rq,FALSE,FALSE,
+glm-residuals,rt_pr_tgp,FALSE,FALSE,
+glm-residuals,rt_pr_sct,FALSE,FALSE,
+glm-residuals,rt_pr_sct2,FALSE,FALSE,
+shifted-log of corrected counts,sl_pc1_sct,TRUE,TRUE,
+shifted-log of corrected counts,sl_pc1_sct2,TRUE,TRUE,
