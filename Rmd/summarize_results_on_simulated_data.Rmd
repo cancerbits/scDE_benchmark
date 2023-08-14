@@ -59,8 +59,11 @@ for (experiment in experiments) {
     method_time = dplyr::filter(res$timing, step == 'de_method')$time
     
     # add geometric mean of simulation, and pipeline label, and fix missing p-values
+    # also fix inverted logFC of DP-simulated genes 
+    # (bug in muscat, see https://github.com/HelenaLC/muscat/issues/125)
     de_res <- res$res %>% 
-      mutate(sim_mean = expm1((log1p(sim_mean.A) + log1p(sim_mean.B)) / 2),
+      mutate(logFC = case_when(category == 'dp' ~ -logFC, TRUE ~ logFC),
+             sim_mean = expm1((log1p(sim_mean.A) + log1p(sim_mean.B)) / 2),
              expr_grp = cut(sim_mean, breaks = gene_mean_breaks, labels = c('low', 'medium', 'high')),
              pval = case_when(is.na(pval) ~ 1, TRUE ~ pval),
              FDR = p.adjust(pval, method = 'fdr'),
@@ -72,10 +75,13 @@ for (experiment in experiments) {
     performance <- summarise(de_res, perf_metrics(pred_de3, true_de3)) %>%
       mutate(time_trans = transformation_time, time_de = method_time)
     
-    performance_strat <- group_by(de_res, expr_grp) %>%
+    performance_by_expr_grp <- group_by(de_res, expr_grp) %>%
       summarise(perf_metrics(pred_de3, true_de3), .groups = 'drop')
     
-    performance_sum <- dplyr::bind_rows(performance, performance_strat) %>%
+    performance_by_category <- group_by(de_res, category) %>%
+      summarise(perf_metrics(pred_de3, true_de3), .groups = 'drop')
+    
+    performance_sum <- dplyr::bind_rows(performance, performance_by_expr_grp, performance_by_category) %>%
       mutate(experiment = experiment, replicate = replicate, transformation = transformation, de_method = de_method, pipeline = pipeline)
       
     return(performance_sum)
@@ -87,6 +93,7 @@ for (experiment in experiments) {
   saveRDS(res, file = file.path(OUT_DIR, sprintf('performance_%s.Rds', experiment))) 
 }
 ```
+
 
 
 # Appendix

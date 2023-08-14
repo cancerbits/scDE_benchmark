@@ -25,16 +25,16 @@ dir.create(report_dir, recursive = TRUE, showWarnings = FALSE)
 #                   envir = new.env())
 
 # run the pipelines on the simulated data
-rmarkdown::render(input = 'Rmd/run_pipelines_on_simulated_data.Rmd',
-                  output_dir = report_dir,
-                  knit_root_dir = config$project_root,
-                  envir = new.env())
-
-# summarize results on the simulated data
-# rmarkdown::render(input = 'Rmd/summarize_results_on_simulated_data.Rmd',
+# rmarkdown::render(input = 'Rmd/run_pipelines_on_simulated_data.Rmd',
 #                   output_dir = report_dir,
 #                   knit_root_dir = config$project_root,
 #                   envir = new.env())
+
+# summarize results on the simulated data
+rmarkdown::render(input = 'Rmd/summarize_results_on_simulated_data.Rmd',
+                  output_dir = report_dir,
+                  knit_root_dir = config$project_root,
+                  envir = new.env())
 
 # rank pipelines on simulated data
 # rmarkdown::render(input = 'Rmd/pipeline_ranking_on_simulated_data.Rmd',
