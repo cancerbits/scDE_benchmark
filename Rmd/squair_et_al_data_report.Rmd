@@ -1,0 +1,315 @@
+---
+title: 'Squair et al. data overview'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+source('R/utilities.R')
+
+library('Matrix')
+library('dplyr')
+library('ComplexHeatmap')
+library('ggplot2')
+library('patchwork')
+
+DATA_DIR <- out_dir <- file.path(config$out_root, 'squair_et_al_data', 'for_benchmark')
+OUT_DIR <- file.path(config$out_root, 'results', 'squair_et_al_data')
+```
+
+# Main
+
+## Load data
+
+```{r}
+fnames <- c('Angelidis2019_24m.rds', 'Angelidis2019_3m.rds', 
+            'CanoGamez2020_Naive-Memory_Resting.rds', 'CanoGamez2020_Naive-iTreg.rds', 
+            'CanoGamez2020_Th0-Th17_Memory.rds', 'CanoGamez2020_Th0-iTreg_Memory.rds',
+            'Hagai2018_mouse-lps.rds', 'Hagai2018_pig-lps.rds', 'Hagai2018_rat-lps.rds')
+
+md <- list()
+#counts_stats <- list()
+bulk_consensus <- list()
+bulk_res <- list()
+
+
+for (fname in fnames) {
+  message(fname)
+  ds_name <- stringr::str_remove(fname, '\\.[Rr]ds$')
+  obj <- readRDS(file = file.path(DATA_DIR, fname))
+  
+  print(table(obj$bulk_consensus$grp1, obj$bulk_consensus$grp2, useNA = 'always'))
+  
+  obj$md$n_umi <- colSums(obj$counts)
+  obj$md$n_features <- colSums(obj$counts > 0)
+  md[[fname]] <- obj$md %>%
+    mutate(dataset = ds_name)
+  
+  bulk_res[[fname]] <- obj$bulk_res %>%
+    mutate(dataset = ds_name)
+  bulk_consensus[[fname]] <- data.frame(#Group = levels(obj$md$grouping),
+                                  Group = c('Group 1', 'Group 2'),
+                                  DE_high = c(sum(obj$bulk_consensus$grp1 == 1, na.rm = TRUE),
+                                              sum(obj$bulk_consensus$grp2 == 1, na.rm = TRUE)),
+                                  dataset = c(ds_name, ds_name))
+}
+
+md <- bind_rows(md) %>%
+  mutate(dataset = forcats::fct_inorder(dataset))
+bulk_consensus <- bind_rows(bulk_consensus) %>%
+  mutate(dataset = forcats::fct_inorder(dataset))
+bulk_res <- bind_rows(bulk_res) %>%
+  mutate(dataset = forcats::fct_inorder(dataset))
+```
+
+## Ground truth summaries
+
+Number of replicates per group
+
+```{r}
+
+```
+
+
+Number of DE genes
+
+```{r}
+# plot_list <- lapply(unique(bulk_consensus$dataset), function(ds_name) {
+#   filter(bulk_consensus, dataset == ds_name) %>%
+#     ggplot(aes(Group, DE_high)) +
+#     geom_bar(stat = 'identity') +
+#     ylab('Genes DE') +
+#     ggtitle(ds_name) +
+#     theme(plot.title = element_text(size = 10))
+# })
+# 
+# wrap_plots(plot_list, ncol = 3)
+  
+bulk_consensus %>%
+  dplyr::rename(logFC = Group) %>%
+  mutate(logFC = forcats::fct_recode(logFC, positive = 'Group 1', negative = 'Group 2')) %>%
+  ggplot(aes(dataset, DE_high, fill = logFC)) +
+    geom_bar(stat = 'identity') +
+    ylab('Number of DE genes') +
+  theme(axis.text.x = element_text(angle = 35, hjust = 1)) +
+  xlab("Dataset") +
+  ggtitle('Bulk-derived ground truth (consensus)')
+
+```
+
+Show how the bulk results compare across the methods
+
+```{r}
+BiocManager::install('ggupset')
+library('ggupset')
+plot_data <- mutate(bulk_res, 
+                    DE = effect_direction * (FDR < 0.05),
+                    DE = case_when(DE == -1 ~ 'Group 2', DE == 0 ~ 'Not DE', TRUE ~ 'Group 1'),
+                    DE_group = paste(de_method, DE),
+                    DE_group = factor(DE_group, levels = sort(unique(DE_group)), ordered = TRUE)) %>%
+  group_by(dataset, feature) %>%
+  summarise(DE_groups = list(sort(DE_group)), .groups = 'drop')
+
+filter(plot_data, dataset == 'Angelidis2019_24m') %>%
+  ggplot(aes(x = DE_groups)) +
+    geom_bar() +
+    scale_x_upset(order_by = 'freq')
+```
+
+Use ComplexHeatmap
+
+```{r, fig.width=5, fig.height=3, out.width='50%'}
+
+plot_data <- mutate(bulk_res, 
+                    DE = effect_direction * (FDR < 0.05),
+                    DE = case_when(DE == -1 ~ 'Group 2', DE == 0 ~ 'Not DE', TRUE ~ 'Group 1'),
+                    DE_group = paste(de_method, DE),
+                    dataset = stringr::str_replace(dataset, 'Angelidis2019_', 'Ang_'),
+                    dataset = stringr::str_replace(dataset, 'CanoGamez2020_', 'Can_'),
+                    dataset = stringr::str_replace(dataset, 'Hagai2018_', 'Hag_'))
+
+set_order <- arrange(plot_data, DE, DE_group) %>% pull(DE_group) %>% unique()
+
+upset_plot <- function(plot_data, sel_dataset, set_order) {
+  DE_groups <- sort(unique(plot_data$DE_group))
+  
+  plot_list <- lapply(DE_groups, function(sel_DE_group) {
+    filter(plot_data, dataset == sel_dataset, DE_group == sel_DE_group)$feature
+  })
+  names(plot_list) <- DE_groups
+
+  m <- ComplexHeatmap::make_comb_mat(plot_list)
+  ss = set_size(m)
+  cs = comb_size(m)
+  
+  ht <- ComplexHeatmap::UpSet(m, set_order = set_order, comb_order = order(-comb_size(m)),
+                              top_annotation = upset_top_annotation(m, ylim = c(0, max(cs)*1.1)))
+  ht <- draw(ht)
+  
+  # add numbers
+  od = column_order(ht)
+  decorate_annotation("intersection_size", {
+      grid.text(cs[od], x = seq_along(cs), y = unit(cs[od], "native") + unit(2, "pt"), 
+          default.units = "native", just = c("left", "bottom"), 
+          gp = gpar(fontsize = 6, col = "#404040"), rot = 45)
+  })
+  decorate_annotation("intersection_size", {
+      grid.text(sel_dataset, x = 0.7, y = 0.95,
+                gp = gpar(fontsize = 12))
+  })
+  invisible()
+}
+```
+
+```{r, fig.width=5, fig.height=3.5, out.width='50%', fig.show='hide'}
+upset_list <- lapply(unique(plot_data$dataset), function(dataset) {
+  upset_plot(plot_data, sel_dataset = dataset, set_order = rev(set_order))
+  return(grid.grab())
+})
+```
+
+```{r, fig.width=4*3, fig.height=3.4*3, out.width='100%'}
+wrap_plots(upset_list, ncol = 3)
+```
+
+
+```{r}
+# BiocManager::install('eulerr')
+# library('eulerr')
+# 
+# plot_data <- mutate(bulk_res, 
+#                     DE = effect_direction * (FDR < 0.05),
+#                     DE = case_when(DE == -1 ~ 'Group 2', DE == 0 ~ 'Not DE', TRUE ~ 'Group 1'),
+#                     DE_group = paste(de_method, DE)) %>%
+#   filter(dataset == 'Angelidis2019_24m')
+# 
+# mat <- table(plot_data$feature, plot_data$DE_group) %>% as.matrix()
+# set.seed(949492)
+# fit <- euler(mat > 0, shape = 'ellipse')
+# 
+# error_plot(fit)
+# plot(fit)
+```
+
+
+## Single-cell summaries
+
+```{r, fig.width=9, fig.height=7, out.width='90%'}
+n <- group_by(md, dataset, grouping, replicate) %>% tally() %>% pull(n)
+yr <- range(n)
+plot_list <- lapply(unique(md$dataset), function(ds_name) {
+  short_name <- stringr::str_replace(ds_name, 'Angelidis2019_', 'Ang_')
+  short_name <- stringr::str_replace(short_name, 'CanoGamez2020_', 'Can_')
+  short_name <- stringr::str_replace(short_name, 'Hagai2018_', 'Hag_')
+  filter(md, dataset == ds_name) %>%
+    ggplot(aes(grouping, fill = replicate)) +
+    geom_bar(position = 'dodge') +
+    coord_cartesian(ylim = yr) +
+    xlab('Group') +
+    ylab('Cells') +
+    scale_fill_discrete(name = 'Replicate') +
+    ggtitle(short_name) +
+    theme(plot.title = element_text(size = 10))
+})
+
+wrap_plots(plot_list, ncol = 3)
+```
+
+
+```{r, fig.width=9, fig.height=7, out.width='90%'}
+xr <- range(log10(md$n_umi))
+xbr <- c(1000, 10000)
+
+plot_list <- lapply(unique(md$dataset), function(ds_name) {
+  short_name <- stringr::str_replace(ds_name, 'Angelidis2019_', 'Ang_')
+  short_name <- stringr::str_replace(short_name, 'CanoGamez2020_', 'Can_')
+  short_name <- stringr::str_replace(short_name, 'Hagai2018_', 'Hag_')
+  filter(md, dataset == ds_name) %>%
+    #mutate(replicate = paste(grouping, replicate)) %>%
+    #mutate(grouping = forcats::fct_inorder(grouping)) %>%
+    ggplot(aes(log10(n_umi))) +
+    geom_density(aes(fill = replicate), alpha = 0.2, color = NA) +
+    geom_density(aes(color = replicate), alpha = 0.8) +
+    scale_x_continuous(name = "Transcripts", labels = xbr, breaks = log10(xbr)) +
+    annotation_logticks(sides = 'b') +
+    facet_grid(grouping ~ ., scales = 'free_y') +
+    ylab('Density') +
+    coord_cartesian(xlim = xr) +
+    scale_fill_discrete(name = 'Replicate') +
+    guides(color = FALSE, fill = FALSE) +
+    ggtitle(short_name) +
+    theme(plot.title = element_text(size = 10)) +
+    theme(panel.grid.minor = element_blank())
+})
+
+wrap_plots(plot_list, ncol = 3)
+
+```
+
+```{r, fig.width=9, fig.height=7, out.width='90%'}
+xr <- range(log10(md$n_features))
+xbr <- c(1, 10, 100, 500, 1000, 5000, 10000)
+
+plot_list <- lapply(unique(md$dataset), function(ds_name) {
+  short_name <- stringr::str_replace(ds_name, 'Angelidis2019_', 'Ang_')
+  short_name <- stringr::str_replace(short_name, 'CanoGamez2020_', 'Can_')
+  short_name <- stringr::str_replace(short_name, 'Hagai2018_', 'Hag_')
+  filter(md, dataset == ds_name) %>%
+    #mutate(replicate = paste(grouping, replicate)) %>%
+    #mutate(grouping = forcats::fct_inorder(grouping)) %>%
+    ggplot(aes(log10(n_features))) +
+    geom_density(aes(fill = replicate), alpha = 0.2, color = NA) +
+    geom_density(aes(color = replicate), alpha = 0.8) +
+    facet_grid(grouping ~ ., scales = 'free_y') +
+    xlab('log10(genes)') +
+    ylab('Density') +
+    coord_cartesian(xlim = xr) +
+    scale_x_continuous(name = "Genes", labels = xbr, breaks = log10(xbr)) +
+    scale_fill_discrete(name = 'Replicate') +
+    annotation_logticks(sides = 'b') +
+    guides(color = FALSE, fill = FALSE) +
+    ggtitle(short_name) +
+    theme(plot.title = element_text(size = 10)) +
+    theme(panel.grid.minor = element_blank())
+})
+
+wrap_plots(plot_list, ncol = 3)
+
+```
+
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Params
+```{r}
+params
+```
+
+
+Session Info
+```{r}
+sessionInfo()
+```
+
+Future plan
+```{r}
+future::plan()
+```
+
+More session info
+```{r}
+devtools::session_info()
+```

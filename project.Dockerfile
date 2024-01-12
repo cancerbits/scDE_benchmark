@@ -1,9 +1,9 @@
-# pull base image
-FROM rocker/tidyverse:4.1.3
+# pull base image (rocker/tidyverse 4.3.1 from June 27, 2023)
+FROM rocker/tidyverse@sha256:35d47a2d3bacf0ada4fe5498e8b6870e8c0d883b7978c1dcad317f91cbfb7d0d
 
 # who maintains this image
 LABEL maintainer Christoph Hafemeister "christoph.hafemeister@ccri.at"
-LABEL version 4.1.3-v1
+LABEL version 4.3.1-v1
 
 # change some permissions
 RUN chmod -R a+rw ${R_HOME}/site-library # so that everyone can dynamically install more libraries within container
@@ -17,26 +17,26 @@ RUN echo "auth-timeout-minutes=0" >> /etc/rstudio/rserver.conf
 RUN echo "auth-stay-signed-in-days=365" >> /etc/rstudio/rserver.conf
 
 # Change default CRAN mirror to a particular snapshot in time
-#ENV CRAN=https://packagemanager.rstudio.com/cran/__linux__/focal/2022-04-21
-#RUN echo "options(repos = c(CRAN = 'https://packagemanager.rstudio.com/cran/__linux__/focal/2022-04-21'), download.file.method = 'libcurl')" >> ${R_HOME}/etc/Rprofile.site
-# To isntall everything from source, use the repo below
-ENV CRAN=https://packagemanager.rstudio.com/cran/2022-04-21
-RUN echo "options(repos = c(CRAN = 'https://packagemanager.rstudio.com/cran/2022-04-21'), download.file.method = 'libcurl')" >> ${R_HOME}/etc/Rprofile.site
+ENV CRAN=https://packagemanager.posit.co/cran/__linux__/jammy/2023-08-14
+RUN echo "options(repos = c(CRAN = 'https://packagemanager.posit.co/cran/__linux__/jammy/2023-08-14'), download.file.method = 'libcurl')" >> ${R_HOME}/etc/Rprofile.site
+# To install everything from source, use the repo below
+#ENV CRAN=https://packagemanager.rstudio.com/cran/2023-08-14
+#RUN echo "options(repos = c(CRAN = 'https://packagemanager.posit.co/cran/2023-08-14'), download.file.method = 'libcurl')" >> ${R_HOME}/etc/Rprofile.site
 
+# update packages
 RUN R -e "update.packages(ask = FALSE)"
-
-# The default CRAN mirror is set to a snapshot from 2022-04-21
-# Bioconductor is at version 3.14
-RUN R -e "BiocManager::install(version = "3.14")"
+RUN R -e "BiocManager::install(ask = FALSE, update = TRUE, force = FALSE)"
 
 # Add some libraries that we need
 RUN apt-get -y update && apt-get -y install \
   libglpk40 \
   libxt6 \
+  libxt-dev \
   libgeos-dev \
   libcairo2-dev \
   libhdf5-dev \
   cmake \
+  patch \
   libgsl-dev \
   && apt-get clean \
   && rm -rf /tmp/* /var/tmp/*
@@ -78,4 +78,4 @@ RUN python -m venv $CELLTYPIST_FOLDER && \
 # more R packages
 RUN R -e "BiocManager::install(c('MAST'))"
 RUN R -e "devtools::install_github(repo = 'stephenturner/annotables', ref = '631423c')"
-RUN R -e "BiocManager::install(c('scDD'))"
+RUN R -e "BiocManager::install(c('scDD', 'fastcluster'))"

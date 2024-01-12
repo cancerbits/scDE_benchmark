@@ -17,6 +17,7 @@
 
 # logs
 docker_build_log_*
+logs
 
 # python cache
 .cache

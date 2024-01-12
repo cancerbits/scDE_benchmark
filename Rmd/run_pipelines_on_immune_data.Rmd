@@ -31,38 +31,17 @@ SEED_DE <- 184920
 
 # Main
 
-Read the pipeline definition files
+## Load pipelines
 ```{r}
-transformations <- readr::read_csv(file = file.path(config$project_root, 'pipelines', 'transformations.csv'))
-de_tests <- readr::read_csv(file = file.path(config$project_root, 'pipelines', 'de_tests.csv'))
+pipelines <- load_pipelines(config)
 ```
 
-Expand all the transformations
+Remove scdeseq because it is just too slow
 ```{r}
-transformations <- tidyr::separate_rows(transformations, `size factor methods`) %>% 
-  mutate(idx = 1:n()) %>%
-  group_by(idx) %>%
-  mutate(name = stringr::str_interp(string = name, env = list(sf = `size factor methods`))) %>%
-  ungroup()
+pipelines <- filter(pipelines, name.de != 'scdeseq')
 ```
 
-Expand all the test methods
-```{r}
-de_tests <- tidyr::separate_rows(de_tests, `size factor methods`) %>% 
-  tidyr::separate_rows(`pseudo replicates`) %>%
-  mutate(idx = 1:n()) %>%
-  group_by(idx) %>%
-  mutate(name = stringr::str_interp(string = name, env = list(sf = `size factor methods`, pr = `pseudo replicates`))) %>%
-  ungroup()
-```
-
-Create data frame of pipelines
-```{r}
-pipelines <- full_join(transformations, de_tests, by = character(), suffix = c(".trans", ".de")) %>%
-  filter(`use with transformation` == 'ANY' | 
-         (`use with transformation` == 'COUNTS' & grepl(pattern = 'counts', x = name.trans)) | 
-         (`use with transformation` == 'SPARSE' & `result is sparse`))
-```
+## Load data
 
 Load the data and summarize again
 ```{r}

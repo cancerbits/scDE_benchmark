@@ -1,0 +1,154 @@
+---
+title: 'Summarize results on Squair et al. data'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+params: 
+  fname: 'Angelidis2019_alvmac.rds'
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+source('R/utilities.R')
+
+library('dplyr')
+library('future.apply')
+library('Matrix')
+
+DATA_DIR <- out_dir <- file.path(config$out_root, 'squair_et_al_data', 'for_benchmark')
+RES_DIR <- file.path(config$out_root, 'results', 'squair_et_al_data')
+OUT_DIR <- file.path(config$out_root, 'results', 'squair_et_al_data_summarized')
+dir.create(path = OUT_DIR, showWarnings = FALSE, recursive = TRUE)
+```
+
+# Main
+
+## Load the single-cell data
+
+We want to collect some gene and comparison level meta data.
+
+```{r}
+fname <- params$fname
+ds_name <- gsub('\\.rds|\\.Rds', '', fname)
+obj <- readRDS(file = file.path(DATA_DIR, fname))
+```
+
+We have multiple replicates per group - set up all pairwise comparisons.
+
+```{r}
+grp_levels <- levels(obj$md$grouping)
+grp1_replicates <- filter(obj$md, grouping == grp_levels[1])$replicate %>% unique()
+grp2_replicates <- filter(obj$md, grouping == grp_levels[2])$replicate %>% unique()
+comps <- expand.grid(grp1_replicates, grp2_replicates)
+```
+
+For every comparison, get the per-group mean for every feature.
+
+```{r}
+gene_mean_breaks <- c(-Inf, 0.1, 1, Inf)
+
+comp_data_md <- lapply(1:nrow(comps), function(i) {
+  sel1 <- obj$md$grouping == grp_levels[1] & obj$md$replicate == comps$Var1[i]
+  sel2 <- obj$md$grouping == grp_levels[2] & obj$md$replicate == comps$Var2[i]
+  
+  comp <- paste(comps$Var1[i], comps$Var2[i], sep = '_')
+  comp_counts <- cbind(obj$counts[, sel1], obj$counts[, sel2])
+  comp_groups <- obj$md$grouping[c(which(sel1), which(sel2))]
+  # keep only features with at least three non-zero observations
+  keep <- rowSums(comp_counts > 0) >= 3
+  comp_counts <- comp_counts[keep, ]
+  
+  group_means <- sctransform:::row_mean_grouped_dgcmatrix(matrix = comp_counts, 
+                                                          group = comp_groups, 
+                                                          shuffle = FALSE)
+  
+  data.frame(feature = rownames(group_means),
+             mean1 = group_means[, 1],
+             mean2 = group_means[, 2], 
+             row.names = NULL) %>%
+    mutate(
+      obs_mean = expm1((log1p(mean1) + log1p(mean2)) / 2),
+      expr_grp = cut(obs_mean, breaks = gene_mean_breaks, labels = c('low', 'medium', 'high')),
+      comparison = comp
+    ) %>%
+    select(feature, expr_grp, comparison)
+}) %>% dplyr::bind_rows()
+table(comp_data_md$comparison, comp_data_md$expr_grp)
+```
+
+## Process the pipeline results
+
+Load every result file (one per comparison and pipeline) and evaluate performance
+
+```{r}
+res_files <- list.files(path = RES_DIR, pattern = ds_name, full.names = TRUE)
+
+res_sum <- future_lapply(res_files, function(res_file) {
+  comp <- gsub(pattern = ds_name, replacement = '', x = basename(res_file)) %>%
+    stringr::str_split(pattern = '-', simplify = TRUE)
+  comp <- comp[2]
+  res <- readRDS(res_file)
+  de_res <- res$res %>% 
+    mutate(pval = case_when(is.na(pval) ~ 1, TRUE ~ pval),
+           FDR = p.adjust(pval, method = 'fdr'),
+           pred_de = FDR < 0.05,
+           pred_de3 = factor(effect_direction * (FDR < 0.05), levels = c(-1, 0, 1)),
+           comparison = comp) %>%
+    left_join(obj$bulk_consensus, by = 'feature') %>%
+    mutate(bulk_de3 = grp2 - grp1)
+  
+  # core DE means full agreement between all bulk methods
+  de_res <- mutate(de_res, bulk_de3 = case_when(bulk_de3 < 1 & bulk_de3 > -1 ~ 0, TRUE ~ bulk_de3))
+  
+  # merge with feature level meta data from input data
+  de_res <- left_join(de_res, comp_data_md, by = c('feature', 'comparison'))
+  
+  # calculate performance metrics
+  performance <- summarise(de_res, perf_metrics(pred_de3, bulk_de3)) 
+  performance_strat <- group_by(de_res, expr_grp) %>%
+    summarise(perf_metrics(pred_de3, bulk_de3), .groups = 'drop')
+  performance_sum <- dplyr::bind_rows(performance, performance_strat)
+  
+  bind_cols(tidyr::pivot_wider(res$timing, names_from = step, values_from = c(name, time)), 
+            performance_sum) %>%
+    mutate(comparison = comp) 
+}) %>% bind_rows()
+
+res_sum <- res_sum %>%
+  dplyr::rename(transformation = name_transformation, 
+                de_method = name_de_method) %>%
+  mutate(time = time_transformation + time_de_method,
+         pipeline = paste(transformation, de_method, sep = '-'))
+```
+
+```{r}
+saveRDS(res_sum, file = file.path(OUT_DIR, sprintf('performance_%s.Rds', ds_name))) 
+```
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```
+
+Future plan
+```{r}
+future::plan()
+```
+
+More session info
+```{r}
+devtools::session_info()
+```

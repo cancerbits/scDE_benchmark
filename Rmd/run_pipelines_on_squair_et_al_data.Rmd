@@ -1,0 +1,129 @@
+---
+title: 'Run pipelines on immune data'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+params: 
+  fname: 'Hagai2018_mouse-lps.rds'
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+source('R/utilities.R')
+source('R/transformations.R')
+source('R/de_methods.R')
+library('dplyr')
+library('future.apply')
+library('Matrix')
+
+DATA_DIR <- out_dir <- file.path(config$out_root, 'squair_et_al_data', 'for_benchmark')
+OUT_DIR <- file.path(config$out_root, 'results', 'squair_et_al_data')
+dir.create(path = OUT_DIR, showWarnings = FALSE, recursive = TRUE)
+SEED_TRANS <- 783838
+SEED_DE <- 184920
+```
+
+# Main
+
+## Load pipelines
+```{r}
+pipelines <- load_pipelines(config)
+```
+
+Remove scdeseq because it is just too slow
+```{r}
+pipelines <- filter(pipelines, name.de != 'scdeseq')
+```
+
+
+
+## Load data
+
+```{r}
+fname <- params$fname
+ds_name <- gsub('\\.rds|\\.Rds', '', fname)
+obj <- readRDS(file = file.path(DATA_DIR, fname))
+```
+
+## Run pipelines
+
+We have multiple replicates per group - set up all pairwise comparisons.
+
+```{r}
+grp_levels <- levels(obj$md$grouping)
+grp1_replicates <- filter(obj$md, grouping == grp_levels[1])$replicate %>% unique()
+grp2_replicates <- filter(obj$md, grouping == grp_levels[2])$replicate %>% unique()
+comps <- expand.grid(grp1_replicates, grp2_replicates)
+```
+
+Create list of jobs and run them
+```{r}
+jobs <- full_join(data.frame(comp = comps), pipelines, by = character()) %>%
+  mutate(comp_str = paste(comp.Var1, comp.Var2, sep = '_'),
+         out_file = file.path(OUT_DIR, sprintf('%s-%s-%s-%s.Rds', ds_name, comp_str, name.trans, name.de)),
+         out_file_exists = file.exists(out_file))
+message('number of jobs: ', nrow(jobs))
+message('number of jobs to skip (output exists): ', sum(jobs$out_file_exists))
+jobs <- filter(jobs, !out_file_exists)
+message('number of jobs to do: ', nrow(jobs))
+
+return_values <- future_sapply(X = 1:nrow(jobs), FUN = function(i) {
+  sel1 <- obj$md$grouping == grp_levels[1] & obj$md$replicate == jobs$comp.Var1[i]
+  sel2 <- obj$md$grouping == grp_levels[2] & obj$md$replicate == jobs$comp.Var2[i]
+  
+  comp_counts <- cbind(obj$counts[, sel1], obj$counts[, sel2])
+  comp_groups <- obj$md$grouping[c(which(sel1), which(sel2))]
+  # keep only features with at least three non-zero observations
+  keep <- rowSums(comp_counts > 0) >= 3
+  comp_counts <- comp_counts[keep, ]
+  
+  transformation <- jobs$name.trans[i]
+  de_method <- jobs$name.de[i]
+  input_data <- list(counts = comp_counts,
+                     cell_metadata = data.frame(group_id = comp_groups))
+  
+  out_file <- jobs$out_file[i]
+  if (file.exists(out_file)) {
+    message(out_file, ' exists')
+    return('exists')
+  } else {
+    res <- run_pipeline(input_data = input_data, 
+                        transformation = transformation, 
+                        de_method = de_method,
+                        seed_trans = SEED_TRANS, seed_de = SEED_DE)
+    saveRDS(object = res, file = out_file)
+    return('done')
+  }
+}, future.seed=NULL)
+table(return_values)
+```
+
+
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```
+
+Future plan
+```{r}
+future::plan()
+```
+
+More session info
+```{r}
+devtools::session_info()
+```

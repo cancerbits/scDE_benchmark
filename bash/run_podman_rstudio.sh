@@ -24,6 +24,7 @@ podman run -d --rm \
   --gidmap $gid:0:1 --gidmap 0:1:$gid --gidmap $(($gid+1)):$(($gid+1)):$(($subgidSize-$gid)) \
   --group-add=keep-groups \
   -p ${1}:8787 \
+  -e RUNROOTLESS=false \
   -e PASSWORD=${2} \
   -e UMASK=002 \
   -e TZ=Europe/Vienna \

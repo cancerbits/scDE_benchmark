@@ -1,0 +1,299 @@
+---
+title: 'Combine pipeline rankings (real data)'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+source('R/utilities.R')
+
+library('dplyr')
+library('ComplexHeatmap')
+library('ggplot2')
+
+RES_DIR <- file.path(config$out_root, 'results')
+FIG_DIR <- file.path(config$out_root, 'figures')
+FIG_SUPP_DIR <- file.path(config$out_root, 'figures', 'supp')
+```
+
+# Main
+
+## Read detailed results
+
+```{r}
+DET_RES_DIR <- file.path(config$out_root, 'results', 'squair_et_al_data_summarized')
+
+exclude <- 'CanoGamez2020_Th0-Th2|Angelidis2019_alvmac|Angelidis2019_pneumo|immune'
+
+fpaths <- list.files(path = DET_RES_DIR, pattern = '^performance_', full.names = TRUE)
+fpaths <- fpaths[!grepl(exclude, fpaths)]
+
+sum_res <- lapply(fpaths, function(f) {
+  ds <- stringr::str_remove(basename(f), pattern = 'performance_')
+  ds <- stringr::str_remove(ds, '\\.Rds')
+  readRDS(f) %>%
+    mutate(dataset = ds) 
+}) %>% bind_rows() 
+
+sum_res <- filter(sum_res, de_method != 'scdeseq')
+```
+
+Average the replicates per dataset
+
+```{r}
+sum_res_avg <- group_by(sum_res, transformation, de_method, pipeline, expr_grp, dataset) %>%
+  summarise(FDR = mean(FDR),
+            Precision = mean(Precision),
+            Sensitivity = mean(Sensitivity),
+            Specificity = mean(Specificity),
+            MCC = mean(MCC),
+            time = mean(time), .groups = 'drop')
+```
+
+For every pipeline, get the MCC_rescaled, FDR_low, FDR_high, time
+
+```{r}
+# squish and rescale the MCC per experiment
+
+fr <- filter(sum_res_avg, is.na(expr_grp)) %>%
+  group_by(dataset) %>%
+  mutate(MCC_rescaled = scales::rescale(scales::oob_squish(MCC))) %>%
+  group_by(transformation, de_method, pipeline) %>%
+  summarise(time = sum(time), MCC_rescaled = mean(MCC_rescaled), .groups = 'drop')
+
+fdr_low <- filter(sum_res_avg, expr_grp == 'low') %>%
+  group_by(transformation, de_method, pipeline) %>%
+  summarise(FDR = mean(FDR), .groups = 'drop') %>%
+  dplyr::rename(FDR_low = FDR)
+
+fdr_high <- filter(sum_res_avg, expr_grp == 'high') %>%
+  group_by(transformation, de_method, pipeline) %>%
+  summarise(FDR = mean(FDR), .groups = 'drop') %>%
+  dplyr::rename(FDR_high = FDR)
+
+fr <- left_join(fr, fdr_low)
+fr <- left_join(fr, fdr_high)
+
+fr <- mutate(fr, score = MCC_rescaled + (1 - FDR_low) + (1 - FDR_high)) %>%
+  arrange(-score) %>%
+  mutate(pos = rank(-score, ties.method = 'min'))
+fr
+```
+
+
+## Create heatmaps
+
+Get data into wide format
+```{r}
+metrics_wide <- filter(sum_res_avg, is.na(expr_grp)) %>%
+                  arrange(dataset) %>%
+                  tidyr::pivot_wider(
+                              id_cols = c(pipeline, transformation, de_method),
+                              names_from = c(dataset, dataset), 
+                              values_from = c(Precision, Sensitivity)) %>%
+  select(-transformation, -de_method) 
+```
+
+Save final ranking 
+```{r}
+saveRDS(list(fr = fr, metrics_wide = metrics_wide), 
+        file = file.path(config$out_root, 'results', 'final_ranking_squair_et_al_combined.Rds'))
+select(fr, pos, transformation, de_method, MCC_rescaled, FDR_low, FDR_high, score, time) %>%
+  readr::write_csv(file = file.path(config$out_root, 'results', 'final_ranking_squair_et_al_combined.csv'))
+```
+
+
+Define the main plotting function
+```{r}
+library('ComplexHeatmap')
+res_heatmap <- function(fr, metrics_wide, idx = 1:nrow(fr), do_rescale = TRUE,
+                        filename = NULL, fig_width = 7, fig_height = 32, 
+                        show_values = TRUE, 
+                        show_col_names = TRUE, anno_left_full = TRUE) {
+  fr <- fr[idx, ]
+  
+  mat <- as.matrix(left_join(fr, metrics_wide, by = 'pipeline') %>%
+                   select(starts_with(c("Prec", "Sens"))))
+  rownames(mat) <- as.character(fr$pipeline)
+  colnames(mat) <- stringr::str_remove(colnames(mat), '^Precision_|^Sensitivity_')
+  colnames(mat) <- stringr::str_replace_all(colnames(mat), pattern = '_', replacement = ' ')
+  colnames(mat) <- gsub("(^|[[:space:]])([[:alpha:]])", "\\1\\U\\2", colnames(mat), perl=TRUE)
+  colnames(mat) <- stringr::str_replace_all(colnames(mat), pattern = 'Vs', replacement = 'vs')
+  
+  # create a scaled version for the colors
+  if (do_rescale) {
+    mat_rescaled <- apply(mat, 2, scales::rescale)
+    heatmap_legend_param <- list(
+            title = 'Column-\nrescaled\nvalue', at = c(0, 1), 
+            labels = c("Worst", "Best"), border = FALSE)
+  } else {
+    mat_rescaled <- mat
+    heatmap_legend_param <- list(title = 'Value')
+  }
+  
+  
+  # create a function print the values in each heatmap cell
+  cell_fun = function(j, i, x, y, width, height, fill) {
+            grid.text(sprintf("%2.0f", mat[i, j]*100), x, y, 
+                      gp = gpar(fontsize = 8, 
+                                col = c('gray75', 'black')[(mat_rescaled[i, j] > 0.4) + 1]))
+  }
+  if (!show_values) {
+    cell_fun = NULL
+  }
+  
+  ta = HeatmapAnnotation(foo = anno_block(
+    gp = gpar(fill = 'gray'),
+    labels = c("Precision", "Sensitivity"), 
+    labels_gp = gpar(col = "black", fontsize = 10)))
+  
+  anno_right <- rowAnnotation(
+    MCC_rescaled = anno_barplot(fr$MCC_rescaled, bar_width = 1),
+    FDR_low = anno_barplot(fr$FDR_low, bar_width = 1),
+    FDR_high = anno_barplot(fr$FDR_high, bar_width = 1),
+    Time = anno_barplot(fr$time, bar_width = 1),
+    annotation_name_rot = 35,
+    annotation_name_side = 'top',
+    annotation_name_offset = unit(6, "points"),
+    annotation_label = list(MCC_rescaled = expression("MCC"["rescaled"]), 
+                         FDR_low = expression("FDR"["low"]), 
+                         FDR_high = expression("FDR"["high"]), 
+                         Time = expression("Time"["seconds"])),
+    gap = unit(6, "points"))
+  
+  if (anno_left_full) {
+    anno_left <- rowAnnotation(
+      Rank = anno_text(fr$pos, 
+                     just = "left", show_name = TRUE, 
+                     width = unit(5, 'mm'), 
+                     gp = gpar(fontsize = 10)),
+    Transformation = anno_text(fr$transformation, 
+                               just = "left", show_name = TRUE, 
+                               width = unit(18, 'mm'), 
+                               gp = gpar(fontsize = 10)),
+    `DE method` = anno_text(fr$de_method, 
+                           just = "left", show_name = TRUE,
+                           width = unit(27, 'mm'), 
+                           gp = gpar(fontsize = 10)), 
+    PB = grepl(pattern = '\\dpr', fr$de_method),
+    col = list(PB = c("FALSE" = "white", "TRUE" = "black")),
+    gap = unit(10, "points"),
+    annotation_name_rot = c(35, 35, 35, 0),
+    annotation_name_side = 'top',
+    annotation_name_offset = unit(6, "points"),
+    show_legend = FALSE)
+  } else {
+    anno_left <- rowAnnotation(
+      PB = grepl(pattern = '\\dpr', fr$de_method),
+      col = list(PB = c("FALSE" = "white", "TRUE" = "black")),
+      gap = unit(10, "points"),
+      annotation_name_rot = 0,
+      annotation_name_align = TRUE,
+      annotation_name_side = 'top',
+      show_legend = FALSE)
+  }
+  
+  
+  
+  ch <- Heatmap(mat_rescaled, cluster_columns = FALSE, cluster_rows = FALSE,
+          show_row_names = FALSE, show_column_names = show_col_names, column_names_rot = 45,
+          column_names_gp = gpar(col = "black", fontsize = 8),
+          col = hcl.colors(n = 21, palette = 'viridis'),
+          name = 'Value', column_title = NULL,
+          column_split = rep(c("A", "B"), each = ncol(mat)/2),
+          top_annotation = ta, right_annotation = anno_right,
+          left_annotation = anno_left,
+          cell_fun = cell_fun,
+          heatmap_legend_param = heatmap_legend_param)
+  
+  if (!is.null(filename)) {
+    cairo_pdf(filename = filename, width = fig_width, height = fig_height)
+    show(ch)
+    decorate_annotation("FDR_low", {
+      grid.lines(c(0.05, 0.05), c(0, nrow(fr))+0.5, 
+                 gp = gpar(lty = 2, col = "red"), 
+                 default.units = "native")
+    })
+    decorate_annotation("FDR_high", {
+      grid.lines(c(0.05, 0.05), c(0, nrow(fr))+0.5, 
+                 gp = gpar(lty = 2, col = "red"), 
+                 default.units = "native")
+    })
+    dev.off()
+  }
+  return(ch)
+}
+```
+
+Big heatmap
+```{r}
+ch <- res_heatmap(fr, metrics_wide, 
+                  filename = file.path(FIG_DIR, 'ranking_squair_et_al_combined_big.pdf'), 
+                  fig_width = 8, fig_height = 48)
+```
+```{r}
+ch <- res_heatmap(fr, metrics_wide, 
+                  filename = file.path(FIG_DIR, 'ranking_squair_et_al_combined_big_squished.pdf'), 
+                  fig_width = 8, fig_height = 3.5, show_values = FALSE, 
+                  show_col_names = FALSE, anno_left_full = TRUE)
+```
+
+Create reduced heatmaps
+
+```{r}
+fr$de_method_grp1 = stringr::str_remove_all(string = fr$de_method, pattern = '\\d+(?=pr)')
+fr <- mutate(fr, de_method_grp1 = stringr::str_remove_all(string = de_method_grp1, pattern = '_(ns|pc|dc|pf|10k|gm)'))
+table(fr$de_method_grp1)
+
+idx <- mutate(fr, idx = 1:nrow(fr)) %>%
+  group_by(de_method_grp1) %>%
+  slice_min(order_by = idx) %>%
+  pull(idx) %>% sort()
+
+ch <- res_heatmap(fr, metrics_wide, idx = idx,
+                  filename = file.path(FIG_DIR, 'ranking_squair_et_al_combined_filter1.pdf'), 
+                  fig_width = 8, fig_height = 5)
+
+fr <- mutate(fr, de_method_grp2 = stringr::str_remove_all(string = de_method_grp1, pattern = '_(lrt|wald|exact|qlf|trend|voom)$'))
+fr <- mutate(fr, de_method_grp2 = stringr::str_remove_all(string = de_method_grp2, pattern = '_(ns|pc|dc|pf|10k|gm)'))
+table(fr$de_method_grp2)
+
+idx <- mutate(fr, idx = 1:nrow(fr)) %>%
+  group_by(de_method_grp2) %>%
+  slice_min(order_by = idx) %>%
+  pull(idx) %>% sort()
+
+ch <- res_heatmap(fr, metrics_wide, idx = idx,
+                  filename = file.path(FIG_DIR, 'ranking_squair_et_al_combined_filter2.pdf'), 
+                  fig_width = 8, fig_height = 6)
+```
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```
+
+Future plan
+```{r}
+future::plan()
+```
+
+More session info
+```{r}
+devtools::session_info()
+```

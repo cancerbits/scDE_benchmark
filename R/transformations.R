@@ -14,13 +14,13 @@ run_tr <- function(mat, transformation, seed = NULL) {
   if (!is.null(seed)) {
     set.seed(seed = seed, kind = 'Mersenne-Twister', normal.kind = 'Inversion', sample.kind = 'Rejection')
   }
-  cat('run_tr:\t', fn, '\t')
+  #cat('run_tr:\t', fn, '\t')
   stime = system.time({
     res <- do.call(what = fn, args = list(counts = mat))
   })
-  timing <- data.frame(transformation = transformation, time = stime[3])
-  cat('elapsed time:\t', stime[3], '\n')
-  return(list(transformation = transformation, timing = timing, res = res))
+  #message('elapsed time:\t', stime[3])
+  message(pprint_time(stime[3]))
+  return(list(res = res, time = stime))
 }
 
 ## helper functions for shifted log transformations
@@ -32,10 +32,12 @@ size_factors <- function(counts, method) {
   if (method == FALSE) {
     return(FALSE)
   }
-  if (method == 'poscounts') {
-    sf <- transformGamPoi:::estimate_size_factors(Y = as.matrix(counts), method = method)
-  } else if (method %in% c('deconvolution', 'normed_sum')) {
-    sf <- transformGamPoi:::estimate_size_factors(Y = counts, method = method)
+  if (method %in% c('poscounts', 'pc')) {
+    sf <- transformGamPoi:::estimate_size_factors(Y = as.matrix(counts), method = 'poscounts')
+  } else if (method %in% c('deconvolution', 'dc')) {
+    sf <- transformGamPoi:::estimate_size_factors(Y = counts, method = 'deconvolution')
+  } else if (method %in% c('normed_sum', 'ns')) {
+    sf <- transformGamPoi:::estimate_size_factors(Y = counts, method = 'normed_sum')
   } else if (method == '10k') {
     if (inherits(x = counts, what = 'dgCMatrix')) {
       sf <- sparseMatrixStats::colSums2(counts) / 1e4
@@ -49,7 +51,7 @@ size_factors <- function(counts, method) {
       cell_sum <- matrixStats::colSums2(counts)
     }
     sf <- cell_sum / mean(cell_sum)
-  } else if (method == 'gmean') {
+  } else if (method %in% c('gmean', 'gm')) {
     if (inherits(x = counts, what = 'dgCMatrix')) {
       feats <- diff(counts@p)
       cell_det_rate <- feats / nrow(counts)

@@ -32,43 +32,17 @@ SEED_DE <- 184920
 # Main
 
 Read the pipeline definition files
+
 ```{r}
-transformations <- readr::read_csv(file = file.path(config$project_root, 'pipelines', 'transformations.csv'))
-de_tests <- readr::read_csv(file = file.path(config$project_root, 'pipelines', 'de_tests.csv'))
+pipelines <- load_pipelines(config)
 ```
 
-Expand all the transformations
-```{r}
-transformations <- tidyr::separate_rows(transformations, `size factor methods`) %>% 
-  mutate(idx = 1:n()) %>%
-  group_by(idx) %>%
-  mutate(name = stringr::str_interp(string = name, env = list(sf = `size factor methods`))) %>%
-  ungroup()
-```
-
-Expand all the test methods
-```{r}
-de_tests <- tidyr::separate_rows(de_tests, `size factor methods`) %>% 
-  tidyr::separate_rows(`pseudo replicates`) %>%
-  mutate(idx = 1:n()) %>%
-  group_by(idx) %>%
-  mutate(name = stringr::str_interp(string = name, env = list(sf = `size factor methods`, pr = `pseudo replicates`))) %>%
-  ungroup()
-```
 
 List data files
 ```{r}
 data_files <- list.files(path = DATA_DIR, full.names = TRUE)
 ```
 
-Create data frame of pipelines
-```{r}
-pipelines <- full_join(transformations, de_tests, by = character(), suffix = c(".trans", ".de")) %>%
-  filter(`use with transformation` == 'ANY' | 
-         (`use with transformation` == 'COUNTS' & grepl(pattern = 'counts', x = name.trans)) | 
-         (`use with transformation` == 'SPARSE' & `result is sparse`) |
-         (`use with transformation` == 'POS' & `result is pos`))
-```
 
 Go over the files, create list of jobs and run them
 ```{r}
@@ -86,22 +60,32 @@ for (f in data_files) {
   )
   message('\tnumber of jobs: ', nrow(jobs))
   
+  # check which output files already exist
+  jobs <- mutate(jobs, 
+                 out_file = file.path(OUT_DIR, sprintf('%s-%02d-%s-%s.Rds', data_name, replicate, name.trans, name.de)),
+                 out_file_exists = file.exists(out_file))
+  message(sprintf('\toutput files of %d jobs already exist - skip them', sum(jobs$out_file_exists)))
+  jobs <- filter(jobs, !out_file_exists)
+  
   return_values <- future_sapply(X = 1:nrow(jobs), FUN = function(i) {
     replicate_n <- jobs$replicate[i]
     transformation <- jobs$name.trans[i]
-    de_method <- jobs$name.de[i]
-    out_file <- file.path(OUT_DIR, sprintf('%s-%02d-%s-%s.Rds', data_name, replicate_n, transformation, de_method))
-    if (file.exists(out_file)) {
-      message(out_file, ' exists')
-      return('exists')
-    } else {
-      res <- run_pipeline(input_data = data_lst[[replicate_n]], 
-                          transformation = transformation, 
-                          de_method = de_method,
-                          seed_trans = SEED_TRANS, seed_de = SEED_DE)
-      saveRDS(object = res, file = out_file)
-      return('done')
-    }
+    name.de <- jobs$name.de[i]
+    out_file <- jobs$out_file[i]
+    
+    message(basename(out_file))
+    res <- run_pipeline(input_data = data_lst[[jobs[i, 'replicate']]], 
+                         transformation = jobs[i, 'name.trans'], 
+                         de_method = jobs[i, 'de method'], 
+                         test_type = jobs[i, 'test type'], 
+                         size_factor_method = jobs[i, 'size factor methods.de'], 
+                         G = jobs[i, 'pseudo replicates'], 
+                         aggregation_strategy = jobs[i, 'aggregation strategy'],
+                         seed_trans = SEED_TRANS, seed_de = SEED_DE)
+    res$job_pars <- jobs[i, ]
+    saveRDS(object = res, file = out_file)
+    return('done')
+    
   }, future.seed=NULL)
   table(return_values)
 }

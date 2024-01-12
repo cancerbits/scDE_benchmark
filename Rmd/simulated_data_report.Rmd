@@ -1,0 +1,138 @@
+---
+title: 'Simulated data overview'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+
+# configure multi-threading
+RhpcBLASctl::blas_set_num_threads(1)
+RhpcBLASctl::omp_set_num_threads(1)
+options(future.globals.maxSize = 8 * 1024 ^ 3)
+options(parallelly.fork.enable = TRUE)
+future::plan(strategy = 'future::sequential')
+
+
+source('R/utilities.R')
+
+library('Matrix')
+library('dplyr')
+library('ComplexHeatmap')
+library('ggplot2')
+library('patchwork')
+
+DATA_DIR <- out_dir <- file.path(config$out_root, 'simulated_data')
+SEED_TRANS <- 783838
+SEED_DE <- 184920
+```
+
+# Main
+
+For every dataset and every replicate, give a small overview.
+
+```{r}
+data_files <- list.files(path = DATA_DIR, full.names = TRUE)
+print(basename(data_files))
+```
+
+```{r}
+out_list <- list()
+for (data_file in data_files[1:2]) {
+  data_name <- gsub(pattern = 'sim_data_', replacement = '', x = basename(data_file))
+  data_name <- gsub(pattern = '\\.Rds$', replacement = '', x = data_name)
+  message('simulation experiment ', data_name)
+  
+  sim_dat <- readRDS(file = data_file)
+  for (repl in 1:length(sim_dat)) {
+    message('replicate ', repl)
+    counts <- sim_dat[[repl]]$counts
+    cell_md <- sim_dat[[repl]]$cell_metadata
+    dp_out <- default_processing(counts = counts, run_umap = TRUE)
+    md <- as.data.frame(cbind(cell_md, dp_out$umap)) %>%
+      dplyr::rename(UMAP_1 = V1, UMAP_2 = V2) %>%
+      mutate(dataset = data_name, replicate = repl)
+    
+    # also cluster each group
+    message('clustering')
+    for (grp_level in levels(cell_md$group_id)) {
+      sel <- cell_md$group_id == grp_level
+      dp_out_grp <- default_processing(counts = counts[, sel])
+      for (k in c(3, 5, 7)) {
+        membership <- as.numeric(droplevels(factor(cutree(tree = dp_out_grp$hc, k = k))))
+        md[sel, paste0('cluster_', k)] <- paste(grp_level, membership, sep = '_')
+      }
+    }
+    out_list[[length(out_list) + 1]] <- md
+  }
+}
+md <- bind_rows(out_list)
+```
+
+
+Create massive PDFs with umaps etc
+```{r}
+# one dataset per page
+# one replicate per row
+# one clustering per column
+
+ds <- unique(md$dataset)[2]
+plot_list <- list()
+# density and group labels
+plot_data <- filter(md, dataset == ds)
+p1 <- ggplot(plot_data, aes(UMAP_1, UMAP_2, group = group_id)) +
+  geom_point(aes(color = group_id)) +
+  stat_density_2d(contour_var = 'ndensity', color = 'black', 
+                  breaks = c(0.5, 0.6, 0.7, 0.8, 0.9), linewidth = 0.4, alpha = 0.5) +
+  facet_wrap(~ replicate, scales = 'free') +
+  theme_classic() +
+  theme(axis.text = element_blank(), axis.ticks = element_blank())
+
+p2 <- ggplot(plot_data, aes(UMAP_1, UMAP_2, group = group_id)) +
+  geom_point(aes(color = cluster_3)) +
+  stat_density_2d(contour_var = 'ndensity', color = 'black', 
+                  breaks = c(0.5, 0.6, 0.7, 0.8, 0.9), linewidth = 0.4, alpha = 0.5) +
+  facet_wrap(~ replicate, scales = 'free') +
+  theme_classic() +
+  theme(axis.text = element_blank(), axis.ticks = element_blank())
+
+
+```
+
+
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Params
+```{r}
+params
+```
+
+
+Session Info
+```{r}
+sessionInfo()
+```
+
+Future plan
+```{r}
+future::plan()
+```
+
+More session info
+```{r}
+devtools::session_info()
+```

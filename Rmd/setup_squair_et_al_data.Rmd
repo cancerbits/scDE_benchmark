@@ -1,0 +1,494 @@
+---
+title: 'Setup Squair et al. data'
+author: 'Christoph Hafemeister'
+date: '`r format(Sys.time(), "%B %d, %Y %H:%M:%S %Z")`'
+output:
+  html_document: 
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+    highlight: pygments
+    df_print: paged
+---
+
+# Setup
+
+```{r}
+source("R/setup.R")
+library('dplyr')
+library('Seurat')
+library('canceRbits')
+library('patchwork')
+source('R/utilities.R')
+source('R/de_methods.R')
+
+sc_dir <- file.path(config$out_root, 'squair_et_al_data', 'sc_rnaseq', 'rds')
+bulk_dir <- file.path(config$out_root, 'squair_et_al_data', 'bulk_rnaseq', 'rds')
+out_dir <- file.path(config$out_root, 'squair_et_al_data', 'for_benchmark')
+dir.create(path = out_dir)
+```
+
+## Helper functions
+
+```{r}
+run_bulk_de <- function(mat, grouping, de_method) {
+  if (de_method == 'edger') {
+    de_res <- de_edger(mat = mat, grouping = grouping, test_type = 'QLF')
+  } else if (de_method == 'deseq') {
+    de_res <- de_deseq(mat = round(mat, 0), grouping = grouping, test_type = 'wald')
+  } else if (de_method == 'limma') {
+    de_res <- de_limma(mat = mat, grouping = grouping, test_type = 'trend')
+  } else {
+    stop('de_method needs to be edger, limma, or deseq')
+  }
+  de_res <- de_res %>%
+    mutate(de_method = factor(de_method), 
+           FDR = case_when(is.na(FDR) ~ 1, 
+                           TRUE ~ FDR),
+           effect_direction = case_when(is.na(effect_direction) ~ 0, 
+                                        TRUE ~ effect_direction))
+  return(de_res)
+}
+
+# de_consensus <- function(mat, grouping) {
+#   keep_rows <- rowSums(mat >= 1) > 1
+#   mat <- mat[keep_rows, ]
+#   de_res <- lapply(c('deseq', 'edger', 'limma'), 
+#     function(de_method) run_bulk_de(mat, grouping, de_method)) %>% 
+#     bind_rows() %>%
+#     group_by(feature) %>%
+#     summarise(grp1 = sum(FDR < 0.05 & effect_direction == -1) / 3,
+#               grp2 = sum(FDR < 0.05 & effect_direction == 1) / 3, 
+#               .groups = 'drop')
+#   return(de_res)
+# }
+
+run_all_bulk_de <- function(mat, grouping) {
+  keep_rows <- rowSums(mat >= 1) > 1
+  mat <- mat[keep_rows, ]
+  de_res <- lapply(c('deseq', 'edger', 'limma'), 
+    function(de_method) run_bulk_de(mat, grouping, de_method)) %>% 
+    bind_rows()
+  return(de_res)
+}
+
+make_consensus <- function(bulk_res) {
+  n <- length(unique(bulk_res$de_method))
+  group_by(bulk_res, feature) %>%
+    summarise(grp1 = sum(FDR < 0.05 & effect_direction == -1) / n,
+              grp2 = sum(FDR < 0.05 & effect_direction == 1) / n, 
+              .groups = 'drop')
+}
+
+```
+
+
+# Hagai2018
+
+## Mouse LPS
+
+Load bulk and run consensus DE analysis
+
+```{r}
+fname <- 'Hagai2018_mouse-lps.rds'
+group_levels <- c('LPS4', 'UNST')
+
+s_bulk <- readRDS(file = file.path(bulk_dir, fname))
+counts <- as.matrix(s_bulk$assay)
+md <- s_bulk$meta
+md$grouping <- factor(md$label, levels = group_levels)
+
+bulk_res <- run_all_bulk_de(mat = counts, grouping = md$grouping)
+bulk_consensus <- make_consensus(bulk_res)
+```
+
+
+single-cell
+
+```{r}
+s <- readRDS(file = file.path(sc_dir, fname))
+dim(s)
+table(s@meta.data$replicate, s@meta.data$label)
+s$grouping <- factor(toupper(s$label), levels = group_levels)
+```
+
+save for benchmark
+
+```{r}
+obj <- list(bulk_res = bulk_res, bulk_consensus = bulk_consensus, counts = s$RNA@counts, md = s@meta.data)
+saveRDS(object = obj, file = file.path(out_dir, fname))
+```
+
+## Rat LPS
+
+Load bulk and run consensus DE analysis
+
+```{r}
+fname <- 'Hagai2018_rat-lps.rds'
+group_levels <- c('LPS4', 'UNST')
+
+s_bulk <- readRDS(file = file.path(bulk_dir, fname))
+counts <- as.matrix(s_bulk$assay)
+md <- s_bulk$meta
+md$grouping <- factor(md$label, levels = group_levels)
+
+bulk_res <- run_all_bulk_de(mat = counts, grouping = md$grouping)
+bulk_consensus <- make_consensus(bulk_res)
+```
+
+```{r}
+table(bulk_consensus$grp1, bulk_consensus$grp2)
+```
+
+single-cell
+
+```{r}
+s <- readRDS(file = file.path(sc_dir, fname))
+dim(s)
+table(s@meta.data$replicate, s@meta.data$label)
+s$grouping <- factor(toupper(s$label), levels = group_levels)
+```
+
+save for benchmark
+
+```{r}
+obj <- list(bulk_res = bulk_res, bulk_consensus = bulk_consensus, counts = s$RNA@counts, md = s@meta.data)
+saveRDS(object = obj, file = file.path(out_dir, fname))
+```
+
+## Pig LPS
+
+Load bulk and run consensus DE analysis
+
+```{r}
+fname <- 'Hagai2018_pig-lps.rds'
+group_levels <- c('LPS4', 'UNST')
+
+s_bulk <- readRDS(file = file.path(bulk_dir, fname))
+counts <- as.matrix(s_bulk$assay)
+md <- s_bulk$meta
+md$grouping <- factor(md$label, levels = group_levels)
+
+bulk_res <- run_all_bulk_de(mat = counts, grouping = md$grouping)
+bulk_consensus <- make_consensus(bulk_res)
+```
+
+```{r}
+table(bulk_consensus$grp1, bulk_consensus$grp2)
+```
+
+single-cell
+
+```{r}
+s <- readRDS(file = file.path(sc_dir, fname))
+dim(s)
+table(s@meta.data$replicate, s@meta.data$label)
+s$grouping <- factor(toupper(s$label), levels = group_levels)
+```
+
+save for benchmark
+
+```{r}
+obj <- list(bulk_res = bulk_res, bulk_consensus = bulk_consensus, counts = s$RNA@counts, md = s@meta.data)
+saveRDS(object = obj, file = file.path(out_dir, fname))
+```
+
+
+
+# Cano-Gamez 2020
+
+## Load all
+
+Bulk
+```{r}
+fnames <- list.files(path = bulk_dir, pattern = '^CanoGamez', full.names = TRUE)
+dat <- lapply(fnames, function(fname) {
+  readRDS(file = fname)
+})
+counts <- Reduce(cbind, lapply(dat, function(x) x$assay))
+md <- Reduce(rbind, lapply(dat, function(x) x$meta))
+# remove duplicates
+keep <- !duplicated(md$sample_id)
+counts <- counts[, keep]
+md <- md[keep, ]
+```
+
+single cell
+```{r}
+fnames <- list.files(path = sc_dir, pattern = '^CanoGamez', full.names = TRUE)
+dat <- lapply(fnames, function(fname) {
+  readRDS(file = fname)
+})
+big_s <- merge(dat[[1]], dat[2:length(dat)])
+sc_counts <- big_s$RNA@counts
+sc_md <- big_s@meta.data %>%
+  mutate(barcode = stringr::str_extract(V1, '[ACGT]+$'))
+dups <- duplicated(paste(sc_md$cell_type, sc_md$label, sc_md$replicate, sc_md$barcode, sc_md$nCount_RNA, sc_md$nFeature_RNA))
+table(paste(sc_md$cell_type, sc_md$label, sc_md$replicate), dups)
+sc_counts <- sc_counts[, !dups]
+sc_md <- sc_md[!dups, ]
+```
+
+```{r}
+table(md$cell_type, md$cytokine_condition, md$stimulation_time)
+table(sc_md$cell_type, sc_md$label)
+```
+
+Harmonize
+```{r}
+keep <- md$stimulation_time == '5d' & !(md$cytokine_condition == 'Th1')
+counts <- counts[, keep]
+md <- md[keep, ]
+sc_md <- mutate(sc_md, cytokine_condition = case_when(label != 'UNS' ~ label, TRUE ~ 'Resting'))
+```
+
+```{r}
+table(md$cell_type, md$cytokine_condition)
+table(sc_md$cell_type, sc_md$cytokine_condition)
+```
+
+## Compare subtypes: within one cell type
+
+```{r}
+comps <- expand.grid('Th0', setdiff(md$cytokine_condition, c('Resting', 'Th0')), stringsAsFactors = FALSE) %>%
+  as.matrix()
+this_cell_type <- 'Memory' # 'Naive'
+for (i in 1:nrow(comps)) {
+  group_levels <- comps[i, ]
+  message(group_levels[1], ' vs ', group_levels[2], ' in ', this_cell_type)
+  sel_bulk <- md$cell_type == this_cell_type & md$cytokine_condition %in% group_levels
+  bulk_res <- run_all_bulk_de(mat = counts[, sel_bulk], 
+                             grouping = factor(md$cytokine_condition[sel_bulk], levels = group_levels))
+  bulk_consensus <- make_consensus(bulk_res)
+
+  print(table(bulk_consensus$grp1, bulk_consensus$grp2))
+  
+  sel_sc <- sc_md$cell_type == this_cell_type & sc_md$cytokine_condition %in% group_levels
+  sc_md$grouping <- factor(sc_md$cytokine_condition, levels = group_levels)
+  table(sc_md$replicate[sel_sc], sc_md$grouping[sel_sc])
+
+  obj <- list(bulk_res = bulk_res, bulk_consensus = bulk_consensus, counts = sc_counts[, sel_sc], md = sc_md[sel_sc, ])
+  saveRDS(object = obj, file = file.path(out_dir, sprintf('CanoGamez2020_%s-%s_%s.rds', group_levels[1], group_levels[2], this_cell_type)))
+}
+```
+
+## Compare mem vs naive resting
+
+```{r}
+group_levels <- c('Naive', 'Memory')
+cond <- 'Resting'
+sel_bulk <- md$cytokine_condition == cond
+bulk_res <- run_all_bulk_de(mat = counts[, sel_bulk], 
+                         grouping = factor(md$cell_type[sel_bulk], levels = group_levels))
+bulk_consensus <- make_consensus(bulk_res)
+
+print(table(bulk_consensus$grp1, bulk_consensus$grp2))
+```
+
+```{r}
+sel_sc <- sc_md$cytokine_condition == cond
+sc_md$grouping <- factor(sc_md$cell_type, levels = group_levels)
+table(sc_md$replicate[sel_sc], sc_md$grouping[sel_sc])
+
+obj <- list(bulk_res = bulk_res, bulk_consensus = bulk_consensus, counts = sc_counts[, sel_sc], md = sc_md[sel_sc, ])
+saveRDS(object = obj, file = file.path(out_dir, 'CanoGamez2020_Naive-Memory_Resting.rds'))
+```
+
+
+## CanoGamez2020_Naive-iTreg
+
+Load bulk and run consensus DE analysis
+
+```{r}
+fname <- 'CanoGamez2020_Naive-iTreg.rds'
+group_levels <- c('iTreg', 'Resting')
+
+s_bulk <- readRDS(file = file.path(bulk_dir, fname))
+counts <- as.matrix(s_bulk$assay)
+md <- s_bulk$meta
+# keep only the 5d stimulation samples
+md <- filter(md, stimulation_time == '5d')
+counts <- counts[, md$sample_id]
+md$grouping <- factor(md$cytokine_condition, levels = group_levels)
+
+bulk_res <- run_all_bulk_de(mat = counts, grouping = md$grouping)
+bulk_consensus <- make_consensus(bulk_res)
+```
+
+```{r}
+table(bulk_consensus$grp1, bulk_consensus$grp2)
+```
+
+
+single-cell
+
+```{r}
+s <- readRDS(file = file.path(sc_dir, fname))
+dim(s)
+table(s@meta.data$replicate, s@meta.data$label)
+s$label <- stringr::str_replace_all(s$label, pattern = 'UNS', replacement = 'Resting')
+s$grouping <- factor(s$label, levels = group_levels)
+table(s@meta.data$replicate, s@meta.data$label)
+keep <- s@meta.data$replicate != 'D2'
+s <- s[, keep]
+table(s@meta.data$replicate, s@meta.data$label)
+```
+
+save for benchmark
+
+```{r}
+obj <- list(bulk_res = bulk_res, bulk_consensus = bulk_consensus, counts = s$RNA@counts, md = s@meta.data)
+saveRDS(object = obj, file = file.path(out_dir, fname))
+```
+
+
+
+
+# Angelidis 2019
+
+The old vs young comparisons do not yield any DE genes, so compare the cell types instead.
+
+## 24 months
+
+Load bulk and run consensus DE analysis
+
+```{r}
+fname <- 'Angelidis2019_alvmac.rds'
+s_bulk_mac <- readRDS(file = file.path(bulk_dir, fname))
+keep_mac <- s_bulk_mac$meta$label == '24m'
+
+fname <- 'Angelidis2019_pneumo.rds'
+s_bulk_pneumo <- readRDS(file = file.path(bulk_dir, fname))
+keep_pneumo <- s_bulk_pneumo$meta$label == '24m'
+
+grouping <- factor(c(rep('mac', sum(keep_mac)), rep('epi', sum(keep_pneumo))), levels = c('mac', 'epi'))
+bulk_res <- run_all_bulk_de(mat = cbind(s_bulk_mac$assay[, keep_mac], s_bulk_pneumo$assay[, keep_pneumo]), 
+                         grouping = grouping)
+bulk_consensus <- make_consensus(bulk_res)
+```
+
+```{r}
+table(bulk_consensus$grp1, bulk_consensus$grp2)
+```
+
+
+single-cell, keep only the three replicates with most cells per group
+
+```{r}
+fname <- 'Angelidis2019_alvmac.rds'
+s <- readRDS(file = file.path(sc_dir, fname))
+dim(s)
+table(s@meta.data$replicate, s@meta.data$label)
+md_sum <- filter(s@meta.data, label == '24m') %>%
+  group_by(label, replicate) %>%
+  tally() %>%
+  slice_max(order_by = n, n = 3)
+keep <- paste0(s$label, s$replicate) %in% paste0(md_sum$label, md_sum$replicate)
+s <- s[, keep]
+s$replicate <- paste0('Rep', as.numeric(as.factor(s$replicate)))
+s$label <- 'mac'
+
+fname <- 'Angelidis2019_pneumo.rds'
+s2 <- readRDS(file = file.path(sc_dir, fname))
+dim(s2)
+table(s2@meta.data$replicate, s2@meta.data$label)
+md_sum <- filter(s2@meta.data, label == '24m') %>%
+  group_by(label, replicate) %>%
+  tally() %>%
+  slice_max(order_by = n, n = 3)
+keep <- paste0(s2$label, s2$replicate) %in% paste0(md_sum$label, md_sum$replicate)
+s2 <- s2[, keep]
+s2$replicate <- paste0('Rep', as.numeric(as.factor(s2$replicate)))
+s2$label <- 'epi'
+
+s3 <- merge(s, s2)
+table(s3$label, s3$replicate)
+s3$grouping <- factor(s3$label, levels = c('mac', 'epi'))
+```
+
+save for benchmark
+
+```{r}
+fname <- 'Angelidis2019_24m.rds'
+obj <- list(bulk_res = bulk_res, bulk_consensus = bulk_consensus, counts = s3$RNA@counts, md = s3@meta.data)
+saveRDS(object = obj, file = file.path(out_dir, fname))
+```
+
+## 3 months
+
+Load bulk and run consensus DE analysis
+
+```{r}
+fname <- 'Angelidis2019_alvmac.rds'
+s_bulk_mac <- readRDS(file = file.path(bulk_dir, fname))
+keep_mac <- s_bulk_mac$meta$label == '3m'
+
+fname <- 'Angelidis2019_pneumo.rds'
+s_bulk_pneumo <- readRDS(file = file.path(bulk_dir, fname))
+keep_pneumo <- s_bulk_pneumo$meta$label == '3m'
+
+grouping <- factor(c(rep('mac', sum(keep_mac)), rep('epi', sum(keep_pneumo))), levels = c('mac', 'epi'))
+bulk_res <- run_all_bulk_de(mat = cbind(s_bulk_mac$assay[, keep_mac], s_bulk_pneumo$assay[, keep_pneumo]), 
+                         grouping = grouping)
+bulk_consensus <- make_consensus(bulk_res)
+
+```
+
+```{r}
+table(bulk_consensus$grp1, bulk_consensus$grp2)
+```
+
+
+single-cell, keep only the three replicates with most cells per group
+
+```{r}
+fname <- 'Angelidis2019_alvmac.rds'
+s <- readRDS(file = file.path(sc_dir, fname))
+dim(s)
+table(s@meta.data$replicate, s@meta.data$label)
+md_sum <- filter(s@meta.data, label == '3m') %>%
+  group_by(label, replicate) %>%
+  tally() %>%
+  slice_max(order_by = n, n = 3)
+keep <- paste0(s$label, s$replicate) %in% paste0(md_sum$label, md_sum$replicate)
+s <- s[, keep]
+s$replicate <- paste0('Rep', as.numeric(as.factor(s$replicate)))
+s$label <- 'mac'
+
+fname <- 'Angelidis2019_pneumo.rds'
+s2 <- readRDS(file = file.path(sc_dir, fname))
+dim(s2)
+table(s2@meta.data$replicate, s2@meta.data$label)
+md_sum <- filter(s2@meta.data, label == '3m') %>%
+  group_by(label, replicate) %>%
+  tally() %>%
+  slice_max(order_by = n, n = 3)
+keep <- paste0(s2$label, s2$replicate) %in% paste0(md_sum$label, md_sum$replicate)
+s2 <- s2[, keep]
+s2$replicate <- paste0('Rep', as.numeric(as.factor(s2$replicate)))
+s2$label <- 'epi'
+
+s3 <- merge(s, s2)
+table(s3$label, s3$replicate)
+s3$grouping <- factor(s3$label, levels = c('mac', 'epi'))
+```
+
+save for benchmark
+
+```{r}
+fname <- 'Angelidis2019_3m.rds'
+obj <- list(bulk_res = bulk_res, bulk_consensus = bulk_consensus, counts = s3$RNA@counts, md = s3@meta.data)
+saveRDS(object = obj, file = file.path(out_dir, fname))
+```
+
+
+
+
+# Appendix
+
+Runtime: `r time_diff(SETUP_TIME)`
+
+Session Info
+```{r}
+sessionInfo()
+```

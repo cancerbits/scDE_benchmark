@@ -1,24 +1,16 @@
-group,name,use with transformation,size factor methods,pseudo replicates
-non-parametric,random_emp,ANY,,
-non-parametric,random_app,ANY,,
-non-parametric,wilcox,ANY,,
-gaussian model,ttest,ANY,,
-logistic model,logreg,ANY,,
-hurdle model,mast,SPARSE,,
-differential distribution,scdd,POS,,
-gamma-poisson/NB model,qlrt,COUNTS,,
-gamma-poisson/NB model,qlrt_${sf},COUNTS,"10k, pf, ns, pc, dc, gm",
-gamma-poisson/NB model,scdeseq,COUNTS,,
-gamma-poisson/NB model,scedger_lrt,COUNTS,,
-gamma-poisson/NB model,scedger_qlf,COUNTS,,
-gamma-poisson/NB model,scedger_exact,COUNTS,,
-gamma-poisson/NB model,scedger_qlfdetrate,COUNTS,,
-pseudo-bulk from pseudo-replicates,edger_lrt_${pr},COUNTS,,"3pr, 5pr, 7pr"
-pseudo-bulk from pseudo-replicates,edger_qlf_${pr},COUNTS,,"3pr, 5pr, 7pr"
-pseudo-bulk from pseudo-replicates,edger_exact_${pr},COUNTS,,"3pr, 5pr, 7pr"
-pseudo-bulk from pseudo-replicates,deseq_wald_${pr},COUNTS,,"3pr, 5pr, 7pr"
-pseudo-bulk from pseudo-replicates,deseq_lrt_${pr},COUNTS,,"3pr, 5pr, 7pr"
-pseudo-bulk from pseudo-replicates,limma_voom_${pr},COUNTS,,"3pr, 5pr, 7pr"
-pseudo-bulk from pseudo-replicates,limma_trend_${pr},COUNTS,,"3pr, 5pr, 7pr"
-pseudo-bulk from pseudo-replicates,qlrt_${pr},COUNTS,,"3pr, 5pr, 7pr"
-pseudo-bulk from pseudo-replicates,qlrt_${sf}_${pr},COUNTS,"10k, pf, ns, pc, dc, gm","3pr, 5pr, 7pr"
+group,de method,use with transformation,test type,size factor methods,pseudo replicates,aggregation strategy
+non-parametric,random_emp,ANY,,,,
+non-parametric,random_app,ANY,,,,
+non-parametric,wilcox,ANY,,,,
+gaussian model,ttest,ANY,,,,
+logistic model,logreg,ANY,,,,
+hurdle model,mast,SPARSE,,,,
+differential distribution,scdd,POS,,,,
+gamma-poisson/NB model,qlrt,COUNTS,,"none, 10k, pf, ns, pc, dc, gm",,
+gamma-poisson/NB model,scdeseq,COUNTS,,,,
+gamma-poisson/NB model,scedger,COUNTS,"lrt, qlf, exact",,,
+gamma-poisson/NB model,scedger_qlfdetrate,COUNTS,,,,
+pseudo-bulk from pseudo-replicates,edger,COUNTS,"lrt, qlf, exact",,"3, 5, 7","random, cluster"
+pseudo-bulk from pseudo-replicates,deseq,COUNTS,"lrt, wald",,"3, 5, 7","random, cluster"
+pseudo-bulk from pseudo-replicates,limma,COUNTS,"trend, voom",,"3, 5, 7","random, cluster"
+pseudo-bulk from pseudo-replicates,qlrt,COUNTS,,"none, 10k, pf, ns, pc, dc, gm","3, 5, 7","random, cluster"

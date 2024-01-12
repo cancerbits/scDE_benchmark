@@ -1,15 +1,12 @@
-group,name,result is sparse,result is pos,size factor methods
+group,transformation method,result is sparse,result is pos,size factor methods
 counts,counts,TRUE,TRUE,
 glm-corrected counts,counts_sct,TRUE,TRUE,
 glm-corrected counts,counts_sct2,TRUE,TRUE,
 fractions,sum1,TRUE,TRUE,
-shifted-log,sl_pc1,TRUE,TRUE,
-shifted-log,sl_pc1_${sf},TRUE,TRUE,"10k, pf, ns, pc, dc, gm"
-shifted-log,sl_pc5,FALSE,TRUE,
-shifted-log,sl_pc5_${sf},FALSE,TRUE,"10k, pf, ns, pc, dc, gm"
+shifted-log,sl_pc1,TRUE,TRUE,"none, 10k, pf, ns, pc, dc, gm"
+shifted-log,sl_pc5,FALSE,TRUE,"none, 10k, pf, ns, pc, dc, gm"
 scaled shifted-log,pf_sl_pf,TRUE,TRUE,
-acosh,acosh,TRUE,TRUE,
-acosh,acosh_${sf},TRUE,TRUE,"10k, pf, ns, pc, dc, gm"
+acosh,acosh,TRUE,TRUE,"none, 10k, pf, ns, pc, dc, gm"
 glm-residuals,rt_rq,FALSE,FALSE,
 glm-residuals,rt_pr_tgp,FALSE,FALSE,
 glm-residuals,rt_pr_sct,FALSE,FALSE,

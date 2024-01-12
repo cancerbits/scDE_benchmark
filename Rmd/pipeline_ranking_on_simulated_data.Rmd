@@ -32,63 +32,38 @@ experiment_for_time <- '2k_vs_2k'
 experiment_for_fdr_low <- '2k_vs_2k'
 experiment_for_fdr_high <- '2k_vs_2k'
 experiment_order <- c('20_vs_20', '200_vs_200', '2k_vs_2k', '200_vs_2k')
+fewde_experiments <- paste('fewDE', experiment_order, sep = '_')
+all_experiments <- c(experiment_order, fewde_experiments)
 ```
 
 # Main
 
-## Read the pipeline definitions
-
-Read the pipeline definition files
-```{r}
-transformations <- readr::read_csv(file = file.path(config$project_root, 'pipelines', 'transformations.csv'))
-de_tests <- readr::read_csv(file = file.path(config$project_root, 'pipelines', 'de_tests.csv'))
-```
-
-Expand all the transformations
-```{r}
-transformations <- tidyr::separate_rows(transformations, `size factor methods`) %>% 
-  mutate(idx = 1:n()) %>%
-  group_by(idx) %>%
-  mutate(name = stringr::str_interp(string = name, env = list(sf = `size factor methods`))) %>%
-  ungroup()
-```
-
-Expand all the test methods
-```{r}
-de_tests <- tidyr::separate_rows(de_tests, `size factor methods`) %>% 
-  tidyr::separate_rows(`pseudo replicates`) %>%
-  mutate(idx = 1:n()) %>%
-  group_by(idx) %>%
-  mutate(name = stringr::str_interp(string = name, env = list(sf = `size factor methods`, pr = `pseudo replicates`))) %>%
-  ungroup()
-```
-
-Create data frame of pipelines
-```{r}
-pipelines <- full_join(transformations, de_tests, by = character(), suffix = c(".trans", ".de")) %>%
-  filter(`use with transformation` == 'ANY' | 
-         (`use with transformation` == 'COUNTS' & grepl(pattern = 'counts', x = name.trans)) | 
-         (`use with transformation` == 'SPARSE' & `result is sparse`)) %>%
-  mutate(pipeline = paste(name.trans, name.de, sep = '-'))
-```
-
-
 ## Read in all results
+
+Create two results tables, one for the experiments with 10% DE genes, ones for the experiments with 1% DE genes (fewDE).
 
 ```{r}
 rds_files <- list.files(path = RES_DIR, pattern = '^performance_.*\\.Rds$', full.names = TRUE)
 res_list <- lapply(rds_files, readRDS)
+
 res <- as_tibble(data.table::rbindlist(res_list)) %>%
-  mutate(experiment = factor(experiment, levels = experiment_order))
+  mutate(experiment = factor(experiment, levels = all_experiments)) %>%
+  filter(experiment %in% experiment_order)
+
+res_fewde <- as_tibble(data.table::rbindlist(res_list)) %>%
+  mutate(experiment = factor(experiment, levels = all_experiments)) %>%
+  filter(experiment %in% fewde_experiments)
 ```
 
 ## Rank based on MCC and FDR
 
-Rescale MCC per experiment-replicate; average the replicates; average the experiments
+Rescale MCC per experiment-replicate; average the replicates; average the experiments.
+
+Do not use the stratified performance, but instead use the metrics from all genes together.
 
 ```{r}
 # squish and rescale the MCC per experiment-replicate
-fr <- filter(res, is.na(expr_grp)) %>%
+fr <- filter(res, is.na(expr_grp), is.na(category)) %>%
   group_by(experiment, replicate) %>%
   mutate(MCC_rescaled = scales::rescale(scales::oob_squish(MCC))) %>%
   group_by(transformation, de_method, pipeline, experiment) %>%
@@ -119,7 +94,7 @@ fr
 We want to show the time as well, add it here
 ```{r}
 # use avg time for the 2k vs 2k runs
-res_time <- filter(res, is.na(expr_grp), experiment == experiment_for_time) %>%
+res_time <- filter(res, is.na(expr_grp), is.na(category), experiment == experiment_for_time) %>%
   group_by(pipeline) %>%
   summarise(time = median(time_trans + time_de), .groups = 'drop')
 fr <- left_join(fr, res_time)

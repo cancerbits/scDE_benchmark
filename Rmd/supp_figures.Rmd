@@ -49,9 +49,10 @@ res_files <- list.files(SIM_DIR, pattern = 'performance_', full.names = TRUE)
 
 trans_time <- lapply(res_files, function(f) {readRDS(f)}) %>% 
   bind_rows() %>%
-  filter(is.na(expr_grp)) %>%
+  filter(is.na(expr_grp), is.na(category)) %>%
   group_by(experiment, transformation) %>%
-  summarise(mean_time = mean(time_trans), .groups = 'drop')
+  summarise(mean_time = mean(time_trans), .groups = 'drop') %>%
+  filter(!grepl(pattern = 'fewDE', x = experiment))
 ```
 
 ```{r}
@@ -98,7 +99,8 @@ res_files <- list.files(SIM_DIR, pattern = 'performance_', full.names = TRUE)
 
 de_time <- lapply(res_files, function(f) {readRDS(f)}) %>% 
   bind_rows() %>%
-  filter(is.na(expr_grp)) %>%
+  filter(is.na(expr_grp), is.na(category)) %>%
+  filter(!grepl(pattern = 'fewDE', x = experiment)) %>%
   group_by(de_method, transformation, experiment) %>%
   summarise(mean_time = mean(time_de), .groups = 'drop')
 ```

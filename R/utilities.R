@@ -13,6 +13,62 @@ time_diff <- function(start_time, end_time = NULL) {
           dt_cpu, attr(x = dt_cpu, which = 'units'))
 }
 
+# pretty print a time length
+pprint_time <- function(dtime) {
+  dtime <- lubridate::make_difftime(num = dtime)
+  sprintf('%s time: %1.2f %s', names(dtime),
+          dtime, attr(x = dtime, which = 'units'))
+}
+
+
+# load all the pipeline definitions from their csv files
+load_pipelines <- function(config) {
+  # read the pipeline definition files
+  transformations <- readr::read_csv(file = file.path(config$project_root, 'pipelines', 'transformations.csv'))
+  de_tests <- readr::read_csv(file = file.path(config$project_root, 'pipelines', 'de_tests.csv'))
+  
+  # expand all the transformations
+  transformations <- tidyr::separate_rows(transformations, `size factor methods`) %>% 
+    mutate(`size factor methods` = case_when(`size factor methods` == 'none' ~ NA_character_,
+                                             TRUE ~ `size factor methods`),
+           name = paste(`transformation method`, `size factor methods`, sep = '_'),
+           name = stringr::str_remove(name, '_NA$'))
+  # transformations <- tidyr::separate_rows(transformations, `size factor methods`) %>% 
+  #   mutate(idx = 1:n()) %>%
+  #   group_by(idx) %>%
+  #   mutate(name = stringr::str_interp(string = name, env = list(sf = `size factor methods`))) %>%
+  #   ungroup()
+  
+  # expand all the test methods
+  de_tests <- tidyr::separate_rows(de_tests, `test type`) %>%
+    tidyr::separate_rows(`size factor methods`) %>%
+    tidyr::separate_rows(`pseudo replicates`) %>%
+    tidyr::separate_rows(`aggregation strategy`) %>%
+    mutate(`size factor methods` = case_when(`size factor methods` == 'none' ~ NA_character_,
+                                             TRUE ~ `size factor methods`),
+           name = paste(`de method`, `size factor methods`, `test type`, `pseudo replicates`, `aggregation strategy`, sep = '_'),
+           name = stringr::str_remove_all(name, '_NA'))
+    
+  # 
+  # de_tests <- tidyr::separate_rows(de_tests, `size factor methods`) %>% 
+  #   tidyr::separate_rows(`pseudo replicates`) %>%
+  #   mutate(idx = 1:n()) %>%
+  #   group_by(idx) %>%
+  #   mutate(name = stringr::str_interp(string = name, env = list(sf = `size factor methods`, pr = `pseudo replicates`))) %>%
+  #   ungroup()
+  
+  # create data frame of pipelines
+  pipelines <- cross_join(transformations, de_tests, suffix = c(".trans", ".de")) %>%
+    filter(`use with transformation` == 'ANY' | 
+          (`use with transformation` == 'COUNTS' & grepl(pattern = 'counts', x = name.trans)) | 
+          (`use with transformation` == 'RAW_COUNTS' & name.trans == 'counts') |
+          (`use with transformation` == 'SPARSE' & `result is sparse`) |
+          (`use with transformation` == 'POS' & `result is pos`))
+  
+  return(pipelines)
+}
+
+
 # helper for downsampling counts
 downsample_counts <- function(counts, frac = 0.70) {
   if (frac >= 1) {
@@ -50,6 +106,31 @@ effect_direction_via_mean <- function(mat, grouping) {
 }
 
 run_pipeline <- function(input_data, transformation, de_method,
+                         test_type, size_factor_method, G, aggregation_strategy,
+                         seed_trans = NULL, seed_de = NULL) {
+  trans_out <- run_tr(mat = input_data$counts, transformation = transformation, seed = seed_trans)
+  
+  de_out <- run_de(mat = trans_out$res, 
+                   grouping = input_data$cell_metadata$group_id, 
+                   test_method = de_method, 
+                   test_type = test_type, 
+                   size_factor_method = size_factor_method, 
+                   G = G, 
+                   aggregation_strategy = aggregation_strategy, 
+                   seed = seed_de)
+  
+  # join the de results with the simulation parameters if they are available
+  if ('sim_metadata' %in% names(input_data)) {
+    res <- dplyr::left_join(de_out$res, input_data$sim_metadata$gene_info, by = c('feature' = 'gene'))
+  } else {
+    res <- de_out$res
+  }
+  timing <- rbind(trans_out$time, de_out$time)
+  rownames(timing) <- c('transformation', 'de_method')
+  return(list(res = res, timing = timing))
+}
+
+run_pipeline_old <- function(input_data, transformation, de_method,
                          seed_trans = NULL, seed_de = NULL) {
   trans_out <- run_tr(mat = input_data$counts, transformation = transformation, seed = seed_trans)
   de_out <- run_de(mat = trans_out$res, grouping = input_data$cell_metadata$group_id,
@@ -98,6 +179,8 @@ class_stats <- function(prediction, reference, FDR = NULL, JS = TRUE) {
 
 # assumes three states: -1, 0, 1
 three_way_confusion <- function(prediction, reference) {
+  prediction <- factor(prediction, levels = c(-1, 0, 1))
+  reference <- factor(reference, levels = c(-1, 0, 1))
   tab <- table(reference, prediction)
   OD <- tab[1,3] + tab[3,1]  # opposite effect direction
   TP <- tab[1,1] + tab[3,3]
@@ -126,3 +209,37 @@ perf_metrics <- function(prediction, reference) {
            OR = (TP * TN) / (FP * FN),
            ORSS = (OR - 1) / (OR + 1))
 }
+
+
+## some basic scRNA-seq processing
+
+# normalization, dimensionality reduction, hierarchical clustering
+default_processing <- function(counts, sct_res_clip_range = c(-10, 10), pca_dim = 7, run_umap = FALSE) {
+  vst_out <- sctransform::vst(umi = counts, method = 'glmGamPoi', res_clip_range = sct_res_clip_range, verbosity = 0)
+  pca_out <- irlba::prcomp_irlba(x = t(vst_out$y), n = pca_dim, center = TRUE, scale. = FALSE)
+  dmat <- dist(pca_out$x, method = 'euclidean')
+  hc <- fastcluster::hclust(d = dmat, method = 'ward.D2')
+  umap <- NA
+  if (run_umap) {
+    umap <- uwot::umap(X = dmat, n_neighbors = nrow(pca_out$x)/2, fast_sgd = TRUE, min_dist = 1)
+  }
+  return(list(vst_out = vst_out, pca_out = pca_out, dmat = dmat, hc = hc, umap = umap))
+}
+
+# hard clustering
+cluster_counts <- function(counts, k, ...) {
+  dp_out <- default_processing(counts, ...)
+  membership <- as.numeric(droplevels(factor(cutree(tree = dp_out$hc, k = k))))
+  tab <- table(membership)
+  if (length(tab) != k) {
+    stop('Fewer/more clusters than asked for')
+  }
+  if (sum(tab > 0) < k) {
+    stop('Empty clusters')
+  }
+  if (min(tab) == 1) {
+    warning('At least one cluster has only one member')
+  }
+  return(membership)
+}
+
