@@ -110,7 +110,7 @@ bulk_consensus %>%
 Show how the bulk results compare across the methods
 
 ```{r}
-BiocManager::install('ggupset')
+BiocManager::install('ggupset', update = FALSE)
 library('ggupset')
 plot_data <- mutate(bulk_res, 
                     DE = effect_direction * (FDR < 0.05),

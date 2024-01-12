@@ -41,10 +41,10 @@ fnames <- c('Angelidis2019_24m.rds', 'Angelidis2019_3m.rds',
 #                   envir = new.env())
 
 # simulate data using muscat
-rmarkdown::render(input = 'Rmd/simulate_data.Rmd',
-                  output_dir = report_dir,
-                  knit_root_dir = config$project_root,
-                  envir = new.env())
+# rmarkdown::render(input = 'Rmd/simulate_data.Rmd',
+#                   output_dir = report_dir,
+#                   knit_root_dir = config$project_root,
+#                   envir = new.env())
 
 # run the pipelines on the simulated data
 rmarkdown::render(input = 'Rmd/run_pipelines_on_simulated_data.Rmd',
@@ -53,16 +53,16 @@ rmarkdown::render(input = 'Rmd/run_pipelines_on_simulated_data.Rmd',
                   envir = new.env())
 
 # summarize results on the simulated data
-# rmarkdown::render(input = 'Rmd/summarize_results_on_simulated_data.Rmd',
-#                   output_dir = report_dir,
-#                   knit_root_dir = config$project_root,
-#                   envir = new.env())
+rmarkdown::render(input = 'Rmd/summarize_results_on_simulated_data.Rmd',
+                  output_dir = report_dir,
+                  knit_root_dir = config$project_root,
+                  envir = new.env())
 
 # rank pipelines on simulated data
-# rmarkdown::render(input = 'Rmd/pipeline_ranking_on_simulated_data.Rmd',
-#                   output_dir = report_dir,
-#                   knit_root_dir = config$project_root,
-#                   envir = new.env())
+rmarkdown::render(input = 'Rmd/pipeline_ranking_on_simulated_data.Rmd',
+                  output_dir = report_dir,
+                  knit_root_dir = config$project_root,
+                  envir = new.env())
 
 # run the pipelines on the immune data
 # rmarkdown::render(input = 'Rmd/run_pipelines_on_immune_data.Rmd',

@@ -30,9 +30,14 @@ library('Matrix')
 library('dplyr')
 library('ComplexHeatmap')
 library('ggplot2')
+library('ggrastr')
 library('patchwork')
 
 DATA_DIR <- out_dir <- file.path(config$out_root, 'simulated_data')
+
+FIG_DIR <- file.path(config$out_root, 'figures', 'supp')
+dir.create(path = FIG_DIR, showWarnings = FALSE, recursive = TRUE)
+
 SEED_TRANS <- 783838
 SEED_DE <- 184920
 ```
@@ -48,7 +53,7 @@ print(basename(data_files))
 
 ```{r}
 out_list <- list()
-for (data_file in data_files[1:2]) {
+for (data_file in data_files) {
   data_name <- gsub(pattern = 'sim_data_', replacement = '', x = basename(data_file))
   data_name <- gsub(pattern = '\\.Rds$', replacement = '', x = data_name)
   message('simulation experiment ', data_name)
@@ -58,10 +63,16 @@ for (data_file in data_files[1:2]) {
     message('replicate ', repl)
     counts <- sim_dat[[repl]]$counts
     cell_md <- sim_dat[[repl]]$cell_metadata
+    gene_info <- sim_dat[[repl]]$sim_metadata$gene_info
     dp_out <- default_processing(counts = counts, run_umap = TRUE)
     md <- as.data.frame(cbind(cell_md, dp_out$umap)) %>%
       dplyr::rename(UMAP_1 = V1, UMAP_2 = V2) %>%
-      mutate(dataset = data_name, replicate = repl)
+      mutate(dataset = data_name, replicate = repl,
+             features = colSums(counts > 0), transcripts = colSums(counts),
+             features_ee = sum(gene_info$category == 'ee'),
+             features_de = sum(gene_info$category == 'de'),
+             features_dm = sum(gene_info$category == 'dm'),
+             features_changed = sum(!is.na(gene_info$logFC)))
     
     # also cluster each group
     message('clustering')
@@ -86,30 +97,86 @@ Create massive PDFs with umaps etc
 # one replicate per row
 # one clustering per column
 
-ds <- unique(md$dataset)[2]
-plot_list <- list()
-# density and group labels
-plot_data <- filter(md, dataset == ds)
-p1 <- ggplot(plot_data, aes(UMAP_1, UMAP_2, group = group_id)) +
-  geom_point(aes(color = group_id)) +
-  stat_density_2d(contour_var = 'ndensity', color = 'black', 
-                  breaks = c(0.5, 0.6, 0.7, 0.8, 0.9), linewidth = 0.4, alpha = 0.5) +
-  facet_wrap(~ replicate, scales = 'free') +
-  theme_classic() +
-  theme(axis.text = element_blank(), axis.ticks = element_blank())
+cairo_pdf(filename = file.path(FIG_DIR, 'simulated_data_report_fig1.pdf'), width = 5, height = 9, onefile = TRUE)
 
-p2 <- ggplot(plot_data, aes(UMAP_1, UMAP_2, group = group_id)) +
-  geom_point(aes(color = cluster_3)) +
-  stat_density_2d(contour_var = 'ndensity', color = 'black', 
-                  breaks = c(0.5, 0.6, 0.7, 0.8, 0.9), linewidth = 0.4, alpha = 0.5) +
-  facet_wrap(~ replicate, scales = 'free') +
-  theme_classic() +
-  theme(axis.text = element_blank(), axis.ticks = element_blank())
+for (ds in unique(md$dataset)) {
+  plot_data <- filter(md, dataset == ds)
+  plot_data_long <- plot_data %>%
+    tidyr::pivot_longer(cols = c(group_id, cluster_3, cluster_5, cluster_7), 
+                        names_to = 'grouping', values_to = 'grouping_label') %>%
+    mutate(grouping = factor(grouping, levels = unique(grouping)))
+  
+  p1 <- ggplot(plot_data_long, aes(UMAP_1, UMAP_2, group = grouping_label)) +
+    geom_point(aes(color = grouping_label), size = 0.66) +
+    facet_grid(replicate ~ grouping, scales = 'free') +
+    theme_bw(base_size = 10) +
+    theme(axis.text = element_blank(), axis.ticks = element_blank(), legend.position = 'none') +
+    ggtitle(ds)
+  
+  p2 <- rasterize(p1, layers='Point', dpi=300)
 
+  show(p2)
+}
 
+dev.off()
 ```
 
 
+```{r}
+plot_list <-lapply(unique(md$dataset), function(ds) {
+  plot_data <- filter(md, dataset == ds) %>%
+    mutate(replicate = factor(replicate))
+  
+  xr <- range(log10(plot_data$features))
+  xbr <- c(1, 10, 100, 500, 1000, 2000, 3000, 4000, 5000, 10000)
+  
+  ggplot(plot_data, aes(log10(features))) +
+      geom_density(aes(fill = replicate), alpha = 0.2, color = NA) +
+      geom_density(aes(color = replicate), alpha = 0.8) +
+      facet_grid(group_id ~ ., scales = 'free_y') +
+      xlab('log10(genes)') +
+      ylab('Density') +
+      coord_cartesian(xlim = xr) +
+      scale_x_continuous(name = "Genes", labels = xbr, breaks = log10(xbr)) +
+      scale_fill_discrete(name = 'Replicate') +
+      annotation_logticks(sides = 'b') +
+      guides(color = FALSE, fill = FALSE) +
+      ggtitle(ds) +
+      theme(plot.title = element_text(size = 10)) +
+      theme(panel.grid.minor = element_blank())  
+})
+
+plot_list2 <-lapply(unique(md$dataset), function(ds) {
+  plot_data <- filter(md, dataset == ds) %>%
+    mutate(replicate = factor(replicate))
+  
+  xr <- range(log10(plot_data$transcripts))
+  xbr <- c(1, 10, 100, 500, 1000, 5000, 10000, 50000)
+  
+  ggplot(plot_data, aes(log10(transcripts))) +
+      geom_density(aes(fill = replicate), alpha = 0.2, color = NA) +
+      geom_density(aes(color = replicate), alpha = 0.8) +
+      facet_grid(group_id ~ ., scales = 'free_y') +
+      xlab('log10(transcripts)') +
+      ylab('Density') +
+      coord_cartesian(xlim = xr) +
+      scale_x_continuous(name = "Transcripts", labels = xbr, breaks = log10(xbr)) +
+      scale_fill_discrete(name = 'Replicate') +
+      annotation_logticks(sides = 'b') +
+      guides(color = FALSE, fill = FALSE) +
+      ggtitle(ds) +
+      theme(plot.title = element_text(size = 10)) +
+      theme(panel.grid.minor = element_blank())  
+})
+
+cairo_pdf(filename = file.path(FIG_DIR, 'simulated_data_report_fig2.pdf'), width = 5, height = 9, onefile = TRUE)
+
+wrap_plots(plot_list, ncol = 2)
+
+wrap_plots(plot_list2, ncol = 2)
+
+dev.off()
+```
 
 
 # Appendix

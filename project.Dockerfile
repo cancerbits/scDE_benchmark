@@ -79,3 +79,4 @@ RUN python -m venv $CELLTYPIST_FOLDER && \
 RUN R -e "BiocManager::install(c('MAST'))"
 RUN R -e "devtools::install_github(repo = 'stephenturner/annotables', ref = '631423c')"
 RUN R -e "BiocManager::install(c('scDD', 'fastcluster'))"
+RUN R -e "BiocManager::install(c('ggupset'))"

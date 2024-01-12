@@ -43,14 +43,6 @@ s1 <- CreateSeuratObject(counts = counts[, md$broad_cell_type == 'MONOCYTES'], p
 s2 <- CreateSeuratObject(counts = downsample_counts(counts[, md$broad_cell_type == 'MONOCYTES'], frac = 0.85), project = 'mono_down')
 ```
 
-Add cluster labels
-```{r}
-my_clustering <- cluster_counts(s1$RNA@counts, k = 5)
-s1$cluster_id <- paste0('cluster', my_clustering)
-s2$cluster_id <- paste0('cluster', my_clustering)
-```
-
-
 Merge the two versions
 ```{r}
 s3 <- merge(s1, s2)
@@ -61,14 +53,11 @@ s3 <- merge(s1, s2)
 
 Convert Seurat object to single cell experiment
 ```{r}
-# s3$sample_id <- s3$orig.ident
-# table(s3$sample_id, s3$cluster_id)
-# sce <- as.SingleCellExperiment(s3)
-s3$sample_id <- paste(s3$orig.ident, s3$cluster_id, sep = '_')
-s3$cluster_id <- 'cluster1'
-table(s3$sample_id, s3$cluster_id)
+s3$cluster_id <- '0'
+s3$sample_id <- s3$orig.ident
 sce <- as.SingleCellExperiment(s3)
 ```
+
 Create reference from data
 ```{r}
 ref <- muscat::prepSim(x = sce, verbose = TRUE)
@@ -76,133 +65,14 @@ head(SummarizedExperiment::rowData(ref))
 ```   
 
 
-TMP - sim stuff
-```{r}
-# create one muscat ref per cluster
-sce$orig_cluster <- stringr::str_extract(sce$sample_id, '\\d+$')
-ref_list <- lapply(sort(unique(sce$orig_cluster)), function(cluster_name) {
-  muscat::prepSim(x = sce[, sce$orig_cluster == cluster_name], verbose = TRUE)
-})
-
-# simulate per cluster
-nc_group <- 2000
-sim_list <- lapply(ref_list, function(ref) {
-  done <- FALSE
-  while (!done) {
-    this_sim <- muscat::simData(ref, p_dd = c(0.8, 0, 0.2, 0, 0, 0), nc = nc_group*4, paired = FALSE)
-    sid1 <- metadata(this_sim)$ref_sids[1,1] %>% stringr::str_remove_all('_cluster\\d+$')
-    sid2 <- metadata(this_sim)$ref_sids[1,2] %>% stringr::str_remove_all('_cluster\\d+$')
-    # we accept only specific sample orders
-    if (sid1 == levels(s1$orig.ident) && sid2 == levels(s2$orig.ident)) {
-      done <- TRUE
-    }
-  }
-  print(metadata(this_sim)$ref_sids)
-  return(this_sim)
-})
-
-# extract cells/genes for final data set
-# for every gene, randomly choose one simulation (cluster)
-gene_info <- lapply(1:length(sim_list), function(i) {
-  metadata(sim_list[[i]])$gene_info %>% 
-    mutate(source_sim = i)
-}) %>% bind_rows()
-gene_source <- group_by(gene_info, sim_gene) %>%
-  summarise(source_sim = case_when(n() == 1 ~ source_sim[1], TRUE ~ sample(source_sim, size = 1))) %>%
-  left_join(gene_info)
-table(gene_source$source_sim, gene_source$category)
-# create final count matrix
-count_list <- lapply(unique(gene_source$source_sim), function(i) {
-  # take the first nc_group cells per group
-  sel_cells <- c(which(sim_list[[i]]$group_id == 'A')[1:nc_group], which(sim_list[[i]]$group_id == 'B')[1:nc_group])
-  
-  counts <- assay(sim_list[[i]], 'counts')[filter(gene_source, source_sim == i)$gene, sel_cells]
-  rownames(counts) <- paste(i, rownames(counts), sep = '_')
-  colnames(counts) <- paste('cell', 1:ncol(counts))
-  return(counts)
-})
-count_mat <- do.call(rbind, count_list)
-sim_gene_md <- left_join(data.frame(gene = rownames(count_mat)),  mutate(gene_source, gene = paste(source_sim, gene, sep = '_')))
-sim_cell_md <- data.frame(group_id = factor(c(rep('A', times = nc_group), rep('B', times = nc_group))))
-
-dp_out <- default_processing(counts = Matrix(count_mat), run_umap = TRUE)
-md <- as.data.frame(cbind(sim_cell_md, dp_out$umap)) %>%
-    dplyr::rename(UMAP_1 = '1', UMAP_2 = '2') 
-ggplot(md, aes(UMAP_1, UMAP_2, group = group_id)) +
-  #geom_point(aes(color = group_id, shape = stringr::str_remove(sample_id, '\\.[AB]$'))) +
-  geom_point(aes(color = group_id)) +
-  stat_density_2d(contour_var = 'ndensity', color = 'black', 
-                  breaks = c(0.5, 0.6, 0.7, 0.8, 0.9), linewidth = 0.4, alpha = 0.5)
-  
-# process just one group
-sel_cells <- sim_cell_md$group_id == 'A'
-dp_out <- default_processing(counts = Matrix(count_mat[, sel_cells]), run_umap = TRUE)
-md <- as.data.frame(cbind(sim_cell_md[sel_cells, , drop = FALSE], dp_out$umap)) %>%
-    dplyr::rename(UMAP_1 = '1', UMAP_2 = '2') 
-ggplot(md, aes(UMAP_1, UMAP_2, group = group_id)) +
-  #geom_point(aes(color = group_id, shape = stringr::str_remove(sample_id, '\\.[AB]$'))) +
-  geom_point(aes(color = group_id)) +
-  stat_density_2d(contour_var = 'ndensity', color = 'black', 
-                  breaks = c(0.5, 0.6, 0.7, 0.8, 0.9), linewidth = 0.4, alpha = 0.5)
-# so we don't see the heterogeneity that we expect - no 5 sub-groups within the group :(
-```
-
-Second try - use the different cells
-```{r}
-# filter to genes that are DE in only one cluster and in all simulation sets
-filtered_sim_genes <- group_by(gene_info, sim_gene) %>%
-  summarise(n = n(), d_count = sum(category != 'ee'), .groups = 'drop') %>%
-  filter(n == 5, d_count <= 1) %>%
-  pull(sim_gene)
-
-# sample cells
-
-# how many cells per ref per group
-ssize <- as.numeric(table(ceiling((1:nc_group) %% length(ref_list))))
-
-count_list <- lapply(1:length(ref_list), function(i) {
-  # which cells
-  cellsA <- sample(which(sim_list[[i]]$group_id == 'A'), size = ssize[i])
-  cellsB <- sample(which(sim_list[[i]]$group_id == 'B'), size = ssize[i])
-  counts <- assay(sim_list[[i]], 'counts')[, c(cellsA, cellsB)]
-  colnames(counts) <- sprintf('cell_%d_%d', i, 1:ncol(counts))
-  rownames(counts) <-  metadata(sim_list[[i]])$gene_info$sim_gene
-  return(counts[filtered_sim_genes, ])
-})
-count_mat <- do.call(cbind, count_list)
-
-sim_groups <- as.vector(sapply(1:length(ref_list), function(i) rep(c('A', 'B'), each = ssize[i])))
-sim_ref <- as.vector(sapply(1:length(ref_list), function(i) rep(i, times = ssize[i]*2)))
-sim_cell_md <- data.frame(group_id = sim_groups, ref_id = factor(sim_ref))
-
-dp_out <- default_processing(counts = Matrix(count_mat), run_umap = TRUE)
-md <- as.data.frame(cbind(sim_cell_md, dp_out$umap)) %>%
-    dplyr::rename(UMAP_1 = '1', UMAP_2 = '2') 
-ggplot(md, aes(UMAP_1, UMAP_2, group = group_id)) +
-  #geom_point(aes(color = group_id, shape = stringr::str_remove(sample_id, '\\.[AB]$'))) +
-  geom_point(aes(color = group_id, shape = ref_id)) +
-  stat_density_2d(contour_var = 'ndensity', color = 'black', 
-                  breaks = c(0.5, 0.6, 0.7, 0.8, 0.9), linewidth = 0.4, alpha = 0.5)
-  
-# show how the groups are related
-pb_labels <- factor(paste(md$ref_id, md$group_id))
-pb <- pseudobulk(counts = count_mat, grouping = pb_labels)
-cmat <- cor(log1p(pb))
-ComplexHeatmap::Heatmap(cmat)
-```
-
-
-END TMP
-
-
 Simulate data with different parameters
 
 ```{r}
 p_diff <- 0.1
-p_de <- p_diff
+p_de <- p_diff / 2
 p_ep <- 0
-p_dp <- 0 #p_diff / 4
-p_dm <- 0 #p_diff / 2
+p_dp <- 0
+p_dm <- p_diff / 2
 p_db <- 0
 p_dd <- c(1-p_diff, p_ep, p_de, p_dp, p_dm, p_db)
 nc <- 400
@@ -213,19 +83,6 @@ for (i in 1:N) {
   this_sim <- muscat::simData(ref, p_dd = p_dd, nc = nc, paired = FALSE)
   print(table(this_sim$sample_id))
   print(metadata(this_sim)$ref_sids)
-  
-  # tmp
-  dp_out <- default_processing(counts = Matrix(assay(this_sim, 'counts')), run_umap = TRUE)
-  md <- as.data.frame(cbind(colData(this_sim), dp_out$umap)) %>%
-      dplyr::rename(UMAP_1 = V1, UMAP_2 = V2) 
-  ggplot(md, aes(UMAP_1, UMAP_2, group = group_id)) +
-    geom_point(aes(color = group_id, shape = stringr::str_remove(sample_id, '\\.[AB]$'))) +
-    #geom_point(aes(color = group_id)) +
-    stat_density_2d(contour_var = 'ndensity', color = 'black', 
-                    breaks = c(0.5, 0.6, 0.7, 0.8, 0.9), linewidth = 0.4, alpha = 0.5)
-  gi <- metadata(this_sim)$gene_info
-  head(gi)
-  # end tmp
   
   res[[i]] <- list(counts = Matrix(assay(this_sim, 'counts')),
                    cell_metadata = colData(this_sim),
@@ -292,9 +149,11 @@ Repeat all simulations with fewer DE genes
 ```{r}
 p_diff <- 0.01
 p_de <- p_diff / 2
-p_dp <- 0 #p_diff / 4
+p_ep <- 0
+p_dp <- 0 
 p_dm <- p_diff / 2
-p_dd <- c(1-p_diff, 0, p_de, p_dp, p_dm, 0)
+p_db <- 0
+p_dd <- c(1-p_diff, p_ep, p_de, p_dp, p_dm, p_db)
 nc <- 400
 
 N <- 13
