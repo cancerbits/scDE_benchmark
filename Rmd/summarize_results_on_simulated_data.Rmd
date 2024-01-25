@@ -55,15 +55,12 @@ for (experiment in experiments) {
     pipeline <- paste(transformation, de_method, sep = '-')
     
     res <- readRDS(f) #$res %>% mutate(file = basename(f))
-    transformation_time = dplyr::filter(res$timing, step == 'transformation')$time
-    method_time = dplyr::filter(res$timing, step == 'de_method')$time
+    transformation_time = res$timing['transformation', 'user.self'] #dplyr::filter(res$timing, step == 'transformation')$time
+    method_time = res$timing['de_method', 'user.self'] #dplyr::filter(res$timing, step == 'de_method')$time
     
     # add geometric mean of simulation, and pipeline label, and fix missing p-values
-    # also fix inverted logFC of DP-simulated genes 
-    # (bug in muscat, see https://github.com/HelenaLC/muscat/issues/125)
     de_res <- res$res %>% 
-      mutate(logFC = case_when(category == 'dp' ~ -logFC, TRUE ~ logFC),
-             sim_mean = expm1((log1p(sim_mean.A) + log1p(sim_mean.B)) / 2),
+      mutate(sim_mean = expm1((log1p(sim_mean.A) + log1p(sim_mean.B)) / 2),
              expr_grp = cut(sim_mean, breaks = gene_mean_breaks, labels = c('low', 'medium', 'high')),
              pval = case_when(is.na(pval) ~ 1, TRUE ~ pval),
              FDR = p.adjust(pval, method = 'fdr'),

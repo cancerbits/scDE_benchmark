@@ -14,4 +14,4 @@ out_root: /home/rstudio/mnt_out
 # control multi-threading
 OPENBLAS_NUM_THREADS: 1
 OMP_NUM_THREADS: 1
-R_FUTURE_WORKERS: 96
+R_FUTURE_WORKERS: 64

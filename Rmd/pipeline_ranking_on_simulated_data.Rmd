@@ -88,6 +88,11 @@ fr <- mutate(fr, score = MCC_rescaled + (1 - FDR_low) + (1 - FDR_high)) %>%
 fr
 ```
 
+```{r}
+# TMP block
+filter(res, transformation == 'counts', de_method %in% c('qlrt_gm', 'qlrt_gm_3_cluster', 'qlrt_gm_3_random', 'qlrt_gm_7_cluster', 'qlrt_gm_7_random'), experiment == '200_vs_200', replicate == 1, is.na(expr_grp), is.na(category)) %>% head() %>% as.data.frame()
+```
+
 
 ## Create figures
 

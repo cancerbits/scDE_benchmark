@@ -65,6 +65,10 @@ load_pipelines <- function(config) {
           (`use with transformation` == 'SPARSE' & `result is sparse`) |
           (`use with transformation` == 'POS' & `result is pos`))
   
+  # make sure the types are as expected
+  pipelines <- mutate(pipelines,
+                      `pseudo replicates` = case_when(`pseudo replicates` == 'NA' ~ NA_integer_,
+                                                      TRUE ~ as.integer(`pseudo replicates`)))
   return(pipelines)
 }
 
@@ -229,7 +233,7 @@ default_processing <- function(counts, sct_res_clip_range = c(-10, 10), pca_dim 
 # hard clustering
 cluster_counts <- function(counts, k, ...) {
   dp_out <- default_processing(counts, ...)
-  membership <- as.numeric(droplevels(factor(cutree(tree = dp_out$hc, k = k))))
+  membership <- as.numeric(droplevels(factor(cutree(tree = dp_out$hc, k = k))))-1
   tab <- table(membership)
   if (length(tab) != k) {
     stop('Fewer/more clusters than asked for')

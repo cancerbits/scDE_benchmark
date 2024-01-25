@@ -289,11 +289,11 @@ pseudobulk_de <- function(mat, grouping, G, aggregation_strategy, test_method, .
   # create pseudobulk grouping factor
   pb_group <- factor(1:(2*G) > G)
   
-  if (test_method == 'edgeR') {
+  if (test_method == 'edger') {
     res <- de_edger(mat = pb, grouping = pb_group, ...)
-  } else if (test_method == 'DESeq2') {
+  } else if (test_method == 'deseq') {
     res <- de_deseq(mat = pb, grouping = pb_group, ...)
-  } else if (test_method == 'glmGamPoi') {
+  } else if (test_method == 'qlrt') {
     res <- de_qlrt(mat = pb, grouping = pb_group, ...)
   } else if (test_method == 'limma') {
     res <- de_limma(mat = pb, grouping = pb_group, ...)
@@ -311,10 +311,15 @@ run_de <- function(mat, grouping, test_method, test_type = NULL,
                        size_factor_method = NULL, G = NULL, 
                        aggregation_strategy = NULL, seed = NULL) {
   
-  if (is.numeric(G) && G > 0) {
-    fn <- 'pseudobulk_de'
-  } else {
+  if (length(G) > 1) {
+    stop('G should have length < 2')
+  }
+  if (is.null(G) || is.na(G)) {
     fn <- paste0('de_', test_method)
+  } else {
+    if (is.integer(G) && G > 0) {
+      fn <- 'pseudobulk_de'
+    }
   }
   #args = c(list(mat = mat, grouping = grouping), as.list(...))
   

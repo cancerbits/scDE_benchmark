@@ -66,6 +66,9 @@ for (f in data_files) {
                  out_file_exists = file.exists(out_file))
   message(sprintf('\toutput files of %d jobs already exist - skip them', sum(jobs$out_file_exists)))
   jobs <- filter(jobs, !out_file_exists)
+  if (nrow(jobs) < 1) {
+    next
+  }
   
   return_values <- future_sapply(X = 1:nrow(jobs), FUN = function(i) {
     replicate_n <- jobs$replicate[i]
@@ -87,7 +90,7 @@ for (f in data_files) {
     return('done')
     
   }, future.seed=NULL)
-  table(return_values)
+  print(table(return_values))
 }
 ```
 
