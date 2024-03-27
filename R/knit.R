@@ -47,16 +47,16 @@ fnames <- c('Angelidis2019_24m.rds', 'Angelidis2019_3m.rds',
 #                   envir = new.env())
 
 # run the pipelines on the simulated data
-rmarkdown::render(input = 'Rmd/run_pipelines_on_simulated_data.Rmd',
-                  output_dir = report_dir,
-                  knit_root_dir = config$project_root,
-                  envir = new.env())
+# rmarkdown::render(input = 'Rmd/run_pipelines_on_simulated_data.Rmd',
+#                   output_dir = report_dir,
+#                   knit_root_dir = config$project_root,
+#                   envir = new.env())
 
 # summarize results on the simulated data
-rmarkdown::render(input = 'Rmd/summarize_results_on_simulated_data.Rmd',
-                  output_dir = report_dir,
-                  knit_root_dir = config$project_root,
-                  envir = new.env())
+# rmarkdown::render(input = 'Rmd/summarize_results_on_simulated_data.Rmd',
+#                   output_dir = report_dir,
+#                   knit_root_dir = config$project_root,
+#                   envir = new.env())
 
 # rank pipelines on simulated data
 # rmarkdown::render(input = 'Rmd/pipeline_ranking_on_simulated_data.Rmd',
@@ -99,27 +99,27 @@ rmarkdown::render(input = 'Rmd/summarize_results_on_simulated_data.Rmd',
 # }
 
 # rank pipelines on immune data
-# rmarkdown::render(input = 'Rmd/pipeline_ranking_on_immune_data.Rmd',
-#                   output_dir = report_dir,
-#                   knit_root_dir = config$project_root,
-#                   envir = new.env())
+rmarkdown::render(input = 'Rmd/pipeline_ranking_on_immune_data.Rmd',
+                  output_dir = report_dir,
+                  knit_root_dir = config$project_root,
+                  envir = new.env())
 
 # rank pipelines on squair et al. data
-# for (fname in fnames) {
-#   ds_name <- gsub('\\.rds|\\.Rds', '', fname)
-#   rmarkdown::render(input = 'Rmd/pipeline_ranking_on_squair_et_al_data.Rmd',
-#                     output_dir = report_dir,
-#                     knit_root_dir = config$project_root,
-#                     envir = new.env(),
-#                     params = list(fname = fname),
-#                     output_file = sprintf('pipeline_ranking_on_squair_et_al_data_%s.html', ds_name))
-# }
+for (fname in fnames) {
+  ds_name <- gsub('\\.rds|\\.Rds', '', fname)
+  rmarkdown::render(input = 'Rmd/pipeline_ranking_on_squair_et_al_data.Rmd',
+                    output_dir = report_dir,
+                    knit_root_dir = config$project_root,
+                    envir = new.env(),
+                    params = list(fname = fname),
+                    output_file = sprintf('pipeline_ranking_on_squair_et_al_data_%s.html', ds_name))
+}
 
 # combined ranking of pipelines
-# rmarkdown::render(input = 'Rmd/pipeline_ranking_combined.Rmd',
-#                   output_dir = report_dir,
-#                   knit_root_dir = config$project_root,
-#                   envir = new.env())
+rmarkdown::render(input = 'Rmd/pipeline_ranking_combined.Rmd',
+                  output_dir = report_dir,
+                  knit_root_dir = config$project_root,
+                  envir = new.env())
 
 # create supplemental figures
 # rmarkdown::render(input = 'Rmd/supp_figures.Rmd',

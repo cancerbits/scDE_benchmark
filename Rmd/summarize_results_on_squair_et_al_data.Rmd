@@ -10,7 +10,7 @@ output:
     highlight: pygments
     df_print: paged
 params: 
-  fname: 'Angelidis2019_alvmac.rds'
+  fname: 'Hagai2018_mouse-lps.rds'
 ---
 
 # Setup
@@ -91,11 +91,15 @@ Load every result file (one per comparison and pipeline) and evaluate performanc
 ```{r}
 res_files <- list.files(path = RES_DIR, pattern = ds_name, full.names = TRUE)
 
-res_sum <- future_lapply(res_files, function(res_file) {
-  comp <- gsub(pattern = ds_name, replacement = '', x = basename(res_file)) %>%
+res_sum <- future_lapply(res_files, function(f) {
+  f_parts <- gsub(pattern = ds_name, replacement = '', x = basename(f)) %>%
+    gsub(pattern = '\\.Rds$', replacement = '') %>%
     stringr::str_split(pattern = '-', simplify = TRUE)
-  comp <- comp[2]
-  res <- readRDS(res_file)
+  comp <- f_parts[2]
+  transformation <- f_parts[3]
+  de_method <- f_parts[4]
+  
+  res <- readRDS(f)
   de_res <- res$res %>% 
     mutate(pval = case_when(is.na(pval) ~ 1, TRUE ~ pval),
            FDR = p.adjust(pval, method = 'fdr'),
@@ -111,20 +115,21 @@ res_sum <- future_lapply(res_files, function(res_file) {
   # merge with feature level meta data from input data
   de_res <- left_join(de_res, comp_data_md, by = c('feature', 'comparison'))
   
+  transformation_time = res$timing['transformation', 'user.self'] 
+  method_time = res$timing['de_method', 'user.self'] 
+    
   # calculate performance metrics
-  performance <- summarise(de_res, perf_metrics(pred_de3, bulk_de3)) 
+  performance <- summarise(de_res, perf_metrics(pred_de3, bulk_de3)) %>%
+    mutate(time_transformation = transformation_time, time_de_method = method_time)
   performance_strat <- group_by(de_res, expr_grp) %>%
     summarise(perf_metrics(pred_de3, bulk_de3), .groups = 'drop')
   performance_sum <- dplyr::bind_rows(performance, performance_strat)
   
-  bind_cols(tidyr::pivot_wider(res$timing, names_from = step, values_from = c(name, time)), 
-            performance_sum) %>%
-    mutate(comparison = comp) 
+  performance_sum %>%
+    mutate(comparison = comp, transformation = transformation, de_method = de_method) 
 }) %>% bind_rows()
 
 res_sum <- res_sum %>%
-  dplyr::rename(transformation = name_transformation, 
-                de_method = name_de_method) %>%
   mutate(time = time_transformation + time_de_method,
          pipeline = paste(transformation, de_method, sep = '-'))
 ```

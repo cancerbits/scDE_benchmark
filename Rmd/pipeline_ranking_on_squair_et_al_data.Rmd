@@ -61,7 +61,7 @@ fr <- filter(sum_res, is.na(expr_grp)) %>%
   group_by(comparison) %>%
   mutate(MCC_rescaled = scales::rescale(scales::oob_squish(MCC))) %>%
   group_by(transformation, de_method, pipeline) %>%
-  summarise(time = sum(time), MCC_rescaled = mean(MCC_rescaled), .groups = 'drop')
+  summarise(time = sum(time), MCC_rescaled = mean(MCC_rescaled), Bias = mean(Bias), .groups = 'drop')
 
 fdr_low <- filter(sum_res, expr_grp == 'low') %>%
   group_by(transformation, de_method, pipeline) %>%
@@ -82,6 +82,10 @@ fr <- mutate(fr, score = MCC_rescaled + (1 - FDR_low) + (1 - FDR_high)) %>%
 fr
 ```
 
+Show bias (# reported positives / # actual positives)
+```{r}
+plot(fr$Bias)
+```
 
 
 ## Create heatmaps
@@ -178,7 +182,7 @@ res_heatmap <- function(fr, metrics_wide, idx = 1:nrow(fr), do_rescale = TRUE,
                            just = "left", show_name = TRUE,
                            width = unit(27, 'mm'), 
                            gp = gpar(fontsize = 10)), 
-    PB = grepl(pattern = '\\dpr', fr$de_method),
+    PB = grepl(pattern = '\\d_(random|cluster)', fr$de_method),
     col = list(PB = c("FALSE" = "white", "TRUE" = "black")),
     gap = unit(10, "points"),
     annotation_name_rot = c(35, 35, 35, 0),
@@ -187,7 +191,7 @@ res_heatmap <- function(fr, metrics_wide, idx = 1:nrow(fr), do_rescale = TRUE,
     show_legend = FALSE)
   } else {
     anno_left <- rowAnnotation(
-      PB = grepl(pattern = '\\dpr', fr$de_method),
+      PB = grepl(pattern = '\\d_(random|cluster)', fr$de_method),
       col = list(PB = c("FALSE" = "white", "TRUE" = "black")),
       gap = unit(10, "points"),
       annotation_name_rot = 0,
@@ -243,7 +247,7 @@ ch <- res_heatmap(fr, metrics_wide,
 
 PB vs non-PB
 ```{r}
-pb = grepl(pattern = '\\dpr+', fr$de_method)
+pb = grepl(pattern = '\\d_(random|cluster)', fr$de_method)
 ch <- res_heatmap(fr, metrics_wide, idx = which(pb),
                   filename = file.path(FIG_DIR, sprintf('ranking_squair_et_al_data_big_pb_%s.pdf', ds_name)), 
                   fig_width = 8, fig_height = 16)
@@ -255,7 +259,7 @@ ch <- res_heatmap(fr, metrics_wide, idx = which(!pb),
 Create reduced heatmaps
 
 ```{r}
-fr$de_method_grp1 = stringr::str_remove_all(string = fr$de_method, pattern = '\\d+(?=pr)')
+fr$de_method_grp1 <- stringr::str_remove_all(string = fr$de_method, pattern = '\\d+_(cluster|random)')
 fr <- mutate(fr, de_method_grp1 = stringr::str_remove_all(string = de_method_grp1, pattern = '_(ns|pc|dc|pf|10k|gm)'))
 table(fr$de_method_grp1)
 

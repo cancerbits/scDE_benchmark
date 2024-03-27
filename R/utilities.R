@@ -246,4 +246,3 @@ cluster_counts <- function(counts, k, ...) {
   }
   return(membership)
 }
-

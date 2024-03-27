@@ -96,9 +96,14 @@ return_values <- future_sapply(X = 1:nrow(jobs), FUN = function(i) {
     return('exists')
   } else {
     res <- run_pipeline(input_data = comp_data[[comp]], 
-                        transformation = transformation, 
-                        de_method = de_method,
-                        seed_trans = SEED_TRANS, seed_de = SEED_DE)
+                         transformation = jobs[i, 'name.trans'], 
+                         de_method = jobs[i, 'de method'], 
+                         test_type = jobs[i, 'test type'], 
+                         size_factor_method = jobs[i, 'size factor methods.de'], 
+                         G = jobs[i, 'pseudo replicates'], 
+                         aggregation_strategy = jobs[i, 'aggregation strategy'],
+                         seed_trans = SEED_TRANS, seed_de = SEED_DE)
+    
     saveRDS(object = res, file = out_file)
     return('done')
   }

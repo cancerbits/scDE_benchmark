@@ -117,23 +117,26 @@ for (comp in comps) {
     # merge with feature level meta data from input data
     de_res <- left_join(de_res, filter(comp_data_md, comparison == comp), by = c('feature'))
     
-    performance <- summarise(de_res, perf_metrics(pred_de3, bulk_de3)) 
+    transformation_time = res$timing['transformation', 'user.self'] #dplyr::filter(res$timing, step == 'transformation')$time
+    method_time = res$timing['de_method', 'user.self'] 
+    f_parts <- stringr::str_split(string = stringr::str_remove(basename(f), pattern = '\\.Rds$'), pattern = '-')[[1]]
+    transformation <- f_parts[2]
+    de_method <- f_parts[3]
+    
+    performance <- summarise(de_res, perf_metrics(pred_de3, bulk_de3)) %>%
+      mutate(time_transformation = transformation_time, time_de_method = method_time)
+    
     performance_strat <- group_by(de_res, expr_grp) %>%
       summarise(perf_metrics(pred_de3, bulk_de3), .groups = 'drop')
     performance_sum <- dplyr::bind_rows(performance, performance_strat)
     
-    bind_cols(
-      tidyr::pivot_wider(res$timing, names_from = step, values_from = c(name, time)),
-      performance_sum 
-    ) %>%
-      mutate(comparison = comp) 
+    performance_sum %>%
+      mutate(comparison = comp, transformation = transformation, de_method = de_method) 
   }) %>% bind_rows()
   
   res_list[[comp]] <- comp_res
 }
 sum_res <- bind_rows(res_list) %>%
-  dplyr::rename(transformation = name_transformation, 
-                de_method = name_de_method) %>%
   mutate(time = time_transformation + time_de_method,
          pipeline = paste(transformation, de_method, sep = '-'))
 
